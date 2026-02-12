@@ -4,8 +4,18 @@
 import torch
 import matplotlib.pyplot as plt
 import numpy as np
+from skimage.metrics import structural_similarity as ssim, peak_signal_noise_ratio as psnr
 
 from torchtomo import ParallelBeam, FanBeam, shepp_logan
+
+
+def compute_metrics(recon, phantom):
+    phantom_np = phantom.squeeze().numpy()
+    recon_np = recon.squeeze().numpy()
+    mse = ((recon - phantom) ** 2).mean().item()
+    psnr_val = psnr(phantom_np, recon_np, data_range=1.0)
+    ssim_val = ssim(phantom_np, recon_np, data_range=1.0)
+    return mse, psnr_val, ssim_val
 
 
 def main():
@@ -17,7 +27,7 @@ def main():
     sinogram = projector.forward(phantom)
     recon = projector.fbp(sinogram)
 
-    mse_parallel = ((recon - phantom) ** 2).mean().item()
+    mse_parallel, psnr_parallel, ssim_parallel = compute_metrics(recon, phantom)
 
     axes[0, 0].imshow(phantom.squeeze().numpy(), cmap='gray')
     axes[0, 0].set_title('Original Phantom')
@@ -28,7 +38,7 @@ def main():
     axes[0, 1].axis('off')
 
     axes[0, 2].imshow(recon.squeeze().numpy(), cmap='gray')
-    axes[0, 2].set_title(f'FBP Reconstruction\nMSE: {mse_parallel:.6f}')
+    axes[0, 2].set_title(f'FBP Reconstruction\nMSE: {mse_parallel:.6f} | PSNR: {psnr_parallel:.1f} dB | SSIM: {ssim_parallel:.3f}')
     axes[0, 2].axis('off')
 
     error = (recon - phantom).abs()
@@ -48,7 +58,7 @@ def main():
     sinogram = projector.forward(phantom)
     recon = projector.fbp(sinogram)
 
-    mse_fan = ((recon - phantom) ** 2).mean().item()
+    mse_fan, psnr_fan, ssim_fan = compute_metrics(recon, phantom)
 
     axes[1, 0].imshow(phantom.squeeze().numpy(), cmap='gray')
     axes[1, 0].set_title('Original Phantom')
@@ -59,7 +69,7 @@ def main():
     axes[1, 1].axis('off')
 
     axes[1, 2].imshow(recon.squeeze().numpy(), cmap='gray')
-    axes[1, 2].set_title(f'FBP Reconstruction\nMSE: {mse_fan:.6f}')
+    axes[1, 2].set_title(f'FBP Reconstruction\nMSE: {mse_fan:.6f} | PSNR: {psnr_fan:.1f} dB | SSIM: {ssim_fan:.3f}')
     axes[1, 2].axis('off')
 
     error = (recon - phantom).abs()
@@ -77,9 +87,12 @@ def main():
     plt.suptitle('TorchTomo - Differentiable CT Reconstruction', fontsize=16, fontweight='bold')
     plt.tight_layout()
     plt.savefig('current.png', dpi=150, bbox_inches='tight')
-    print(f"Saved current.png")
-    print(f"Parallel Beam MSE: {mse_parallel:.6f}")
-    print(f"Fan Beam MSE: {mse_fan:.6f}")
+    print("Saved current.png")
+    print()
+    print("Parallel Beam:")
+    print(f"  MSE: {mse_parallel:.6f} | PSNR: {psnr_parallel:.2f} dB | SSIM: {ssim_parallel:.4f}")
+    print("Fan Beam:")
+    print(f"  MSE: {mse_fan:.6f} | PSNR: {psnr_fan:.2f} dB | SSIM: {ssim_fan:.4f}")
 
 
 if __name__ == "__main__":
