@@ -10,9 +10,10 @@ from torchtomo import ParallelBeam, FanBeam, shepp_logan
 
 
 def compute_metrics(recon, phantom):
+    recon_clipped = recon.clamp(0, 1)
     phantom_np = phantom.squeeze().numpy()
-    recon_np = recon.squeeze().numpy()
-    mse = ((recon - phantom) ** 2).mean().item()
+    recon_np = recon_clipped.squeeze().numpy()
+    mse = ((recon_clipped - phantom) ** 2).mean().item()
     psnr_val = psnr(phantom_np, recon_np, data_range=1.0)
     ssim_val = ssim(phantom_np, recon_np, data_range=1.0)
     return mse, psnr_val, ssim_val
