@@ -216,7 +216,9 @@ class TestReconstructionSimilarity:
 class TestFilterConsistency:
     """Compare FBP with different filters between torchtomo and scikit-image."""
 
-    @pytest.mark.parametrize("filter_name", ["ramp", "shepp-logan", "cosine", "hamming", "hann"])
+    @pytest.mark.parametrize(
+        "filter_name", ["ramp", "shepp-logan", "cosine", "hamming", "hann"]
+    )
     @pytest.mark.parametrize("n_angles", [180, 360, 1000])
     def test_filter_reconstruction_gap(self, filter_name, n_angles):
         """Each filter should produce similar results in both libraries."""

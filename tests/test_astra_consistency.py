@@ -565,6 +565,4 @@ class TestFanBeamCrossLibrary:
         recon = projector.fbp(sino_t).clamp(0, 1).squeeze().numpy()
 
         psnr_val = psnr(phantom, recon, data_range=1.0)
-        assert psnr_val > 20, (
-            f"Cross-library FBP PSNR {psnr_val:.2f} dB < 20 dB"
-        )
+        assert psnr_val > 20, f"Cross-library FBP PSNR {psnr_val:.2f} dB < 20 dB"

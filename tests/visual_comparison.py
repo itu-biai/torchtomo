@@ -1,6 +1,7 @@
 """Visual comparison of torchtomo vs scikit-image reconstructions at 512x512."""
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -73,7 +74,9 @@ def plot_comparison(phantom, results, phantom_name, n_angles, save_path):
     r = results
     fig, axes = plt.subplots(2, 4, figsize=(20, 10))
     fig.suptitle(
-        f"{phantom_name} phantom (512x512, {n_angles} angles)", fontsize=16, fontweight="bold"
+        f"{phantom_name} phantom (512x512, {n_angles} angles)",
+        fontsize=16,
+        fontweight="bold",
     )
 
     # Row 1: Phantom, sinograms, difference
@@ -122,7 +125,9 @@ def plot_comparison(phantom, results, phantom_name, n_angles, save_path):
     err_sk = np.abs(phantom - r["recon_sk"])
     err_tt = np.abs(phantom - r["recon_tt"])
     vmax = max(err_sk.max(), err_tt.max())
-    im3 = axes[1, 3].imshow(err_tt - err_sk, cmap="RdBu_r", vmin=-vmax / 2, vmax=vmax / 2)
+    im3 = axes[1, 3].imshow(
+        err_tt - err_sk, cmap="RdBu_r", vmin=-vmax / 2, vmax=vmax / 2
+    )
     axes[1, 3].set_title("Error diff (torchtomo - skimage)\nRed=torchtomo worse")
     axes[1, 3].axis("off")
     plt.colorbar(im3, ax=axes[1, 3], fraction=0.046)
@@ -150,12 +155,22 @@ def main():
         for n_angles in angle_counts:
             print(f"\n--- {phantom_name} phantom, {n_angles} angles ---")
             results = run_comparison(phantom, phantom_name, size, n_angles)
-            print(f"  scikit-image:  PSNR={results['psnr_sk']:.2f} dB, SSIM={results['ssim_sk']:.4f}")
-            print(f"  torchtomo:     PSNR={results['psnr_tt']:.2f} dB, SSIM={results['ssim_tt']:.4f}")
-            print(f"  PSNR gap:      {abs(results['psnr_tt'] - results['psnr_sk']):.2f} dB")
-            print(f"  Cross-recon:   PSNR={results['recon_psnr']:.2f} dB, SSIM={results['recon_ssim']:.4f}")
+            print(
+                f"  scikit-image:  PSNR={results['psnr_sk']:.2f} dB, SSIM={results['ssim_sk']:.4f}"
+            )
+            print(
+                f"  torchtomo:     PSNR={results['psnr_tt']:.2f} dB, SSIM={results['ssim_tt']:.4f}"
+            )
+            print(
+                f"  PSNR gap:      {abs(results['psnr_tt'] - results['psnr_sk']):.2f} dB"
+            )
+            print(
+                f"  Cross-recon:   PSNR={results['recon_psnr']:.2f} dB, SSIM={results['recon_ssim']:.4f}"
+            )
 
-            save_path = f"/home/user/torchtomo/tests/visual_{phantom_name}_{n_angles}angles.png"
+            save_path = (
+                f"/home/user/torchtomo/tests/visual_{phantom_name}_{n_angles}angles.png"
+            )
             plot_comparison(phantom, results, phantom_name, n_angles, save_path)
 
     print("\n" + "=" * 80)
