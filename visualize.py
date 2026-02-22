@@ -1,12 +1,11 @@
 #!/usr/bin/env python
 """Generate visualization of torchtomo reconstruction quality."""
 
-import torch
 import matplotlib.pyplot as plt
-import numpy as np
-from skimage.metrics import structural_similarity as ssim, peak_signal_noise_ratio as psnr
+from skimage.metrics import peak_signal_noise_ratio as psnr
+from skimage.metrics import structural_similarity as ssim
 
-from torchtomo import ParallelBeam, FanBeam, shepp_logan
+from torchtomo import FanBeam, ParallelBeam, shepp_logan
 
 
 def compute_metrics(recon, phantom):
@@ -39,7 +38,10 @@ def main():
     axes[0, 1].axis('off')
 
     axes[0, 2].imshow(recon.squeeze().numpy(), cmap='gray')
-    axes[0, 2].set_title(f'FBP Reconstruction\nMSE: {mse_parallel:.6f} | PSNR: {psnr_parallel:.1f} dB | SSIM: {ssim_parallel:.3f}')
+    axes[0, 2].set_title(
+        f'FBP Reconstruction\nMSE: {mse_parallel:.6f}'
+        f' | PSNR: {psnr_parallel:.1f} dB | SSIM: {ssim_parallel:.3f}'
+    )
     axes[0, 2].axis('off')
 
     error = (recon - phantom).abs()
@@ -70,7 +72,10 @@ def main():
     axes[1, 1].axis('off')
 
     axes[1, 2].imshow(recon.squeeze().numpy(), cmap='gray')
-    axes[1, 2].set_title(f'FBP Reconstruction\nMSE: {mse_fan:.6f} | PSNR: {psnr_fan:.1f} dB | SSIM: {ssim_fan:.3f}')
+    axes[1, 2].set_title(
+        f'FBP Reconstruction\nMSE: {mse_fan:.6f}'
+        f' | PSNR: {psnr_fan:.1f} dB | SSIM: {ssim_fan:.3f}'
+    )
     axes[1, 2].axis('off')
 
     error = (recon - phantom).abs()
@@ -85,13 +90,18 @@ def main():
     axes[1, 0].text(-0.15, 0.5, 'Fan\nBeam', transform=axes[1, 0].transAxes,
                     fontsize=14, fontweight='bold', va='center', ha='center')
 
-    plt.suptitle('TorchTomo - Differentiable CT Reconstruction', fontsize=16, fontweight='bold')
+    plt.suptitle(
+        'TorchTomo - Differentiable CT Reconstruction', fontsize=16, fontweight='bold'
+    )
     plt.tight_layout()
     plt.savefig('current.png', dpi=150, bbox_inches='tight')
     print("Saved current.png")
     print()
     print("Parallel Beam:")
-    print(f"  MSE: {mse_parallel:.6f} | PSNR: {psnr_parallel:.2f} dB | SSIM: {ssim_parallel:.4f}")
+    print(
+        f"  MSE: {mse_parallel:.6f} | PSNR: {psnr_parallel:.2f} dB"
+        f" | SSIM: {ssim_parallel:.4f}"
+    )
     print("Fan Beam:")
     print(f"  MSE: {mse_fan:.6f} | PSNR: {psnr_fan:.2f} dB | SSIM: {ssim_fan:.4f}")
 

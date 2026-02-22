@@ -3,9 +3,10 @@
 
 import numpy as np
 import torch
-from skimage.transform import radon, iradon
-from skimage.metrics import peak_signal_noise_ratio as psnr, structural_similarity as ssim
 from skimage.data import shepp_logan_phantom
+from skimage.metrics import peak_signal_noise_ratio as psnr
+from skimage.metrics import structural_similarity as ssim
+from skimage.transform import iradon, radon
 
 from torchtomo import ParallelBeam
 
@@ -76,7 +77,10 @@ def main():
     for phantom_name, phantom in phantoms:
         print(f"\n{phantom_name}:")
         print("-" * 70)
-        print(f"{'Angles':>8} | {'skimage PSNR':>12} | {'torch PSNR':>12} | {'Gap':>8} | {'skimage SSIM':>12} | {'torch SSIM':>12}")
+        print(
+            f"{'Angles':>8} | {'skimage PSNR':>12} | {'torch PSNR':>12}"
+            f" | {'Gap':>8} | {'skimage SSIM':>12} | {'torch SSIM':>12}"
+        )
         print("-" * 70)
 
         for n_angles in angle_configs:
@@ -84,7 +88,10 @@ def main():
             psnr_tt, ssim_tt, _ = benchmark_torchtomo(phantom, n_angles)
             gap = psnr_tt - psnr_sk
 
-            print(f"{n_angles:>8} | {psnr_sk:>10.2f} dB | {psnr_tt:>10.2f} dB | {gap:>+7.2f} | {ssim_sk:>12.4f} | {ssim_tt:>12.4f}")
+            print(
+                f"{n_angles:>8} | {psnr_sk:>10.2f} dB | {psnr_tt:>10.2f} dB"
+                f" | {gap:>+7.2f} | {ssim_sk:>12.4f} | {ssim_tt:>12.4f}"
+            )
 
     print("\n" + "=" * 70)
     print("Target: TorchTomo should match scikit-image within 1-2 dB")

@@ -2,9 +2,10 @@
 """Benchmark torchtomo forward and back projection throughput."""
 
 import time
+
 import torch
 
-from torchtomo import ParallelBeam, FanBeam, shepp_logan
+from torchtomo import FanBeam, ParallelBeam, shepp_logan
 
 
 def get_available_devices():
@@ -55,7 +56,9 @@ def benchmark_fbp(projector, sinogram, device, n_warmup=5, n_runs=50):
     return n_runs / elapsed
 
 
-def benchmark_batch_forward(projector, phantom, batch_size, device, n_warmup=3, n_runs=20):
+def benchmark_batch_forward(
+    projector, phantom, batch_size, device, n_warmup=3, n_runs=20
+):
     batch = phantom.expand(batch_size, -1, -1, -1).clone()
 
     for _ in range(n_warmup):
@@ -105,7 +108,7 @@ def main():
             fwd_rate = benchmark_forward(projector, phantom, device)
             fbp_rate = benchmark_fbp(projector, sinogram, device)
 
-            print(f"\nParallel Beam (single slice):")
+            print("\nParallel Beam (single slice):")
             print(f"  Forward:  {fwd_rate:>8.1f} slices/sec")
             print(f"  FBP:      {fbp_rate:>8.1f} slices/sec")
 
@@ -122,12 +125,12 @@ def main():
             fwd_rate = benchmark_forward(projector, phantom, device)
             fbp_rate = benchmark_fbp(projector, sinogram, device)
 
-            print(f"\nFan Beam (single slice):")
+            print("\nFan Beam (single slice):")
             print(f"  Forward:  {fwd_rate:>8.1f} slices/sec")
             print(f"  FBP:      {fbp_rate:>8.1f} slices/sec")
 
             # Batch benchmarks
-            print(f"\nBatch Forward Projection (Parallel Beam):")
+            print("\nBatch Forward Projection (Parallel Beam):")
             projector = ParallelBeam(
                 img_size=img_size,
                 n_angles=180,
@@ -136,7 +139,9 @@ def main():
 
             for batch_size in batch_sizes:
                 try:
-                    rate = benchmark_batch_forward(projector, phantom, batch_size, device)
+                    rate = benchmark_batch_forward(
+                        projector, phantom, batch_size, device
+                    )
                     print(f"  Batch {batch_size:>2}: {rate:>8.1f} slices/sec")
                 except RuntimeError as e:
                     if "out of memory" in str(e).lower():

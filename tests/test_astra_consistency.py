@@ -13,8 +13,7 @@ from skimage.metrics import structural_similarity as ssim
 
 astra = pytest.importorskip("astra")
 
-from torchtomo import FanBeam, ParallelBeam, shepp_logan
-
+from torchtomo import FanBeam, ParallelBeam, shepp_logan  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Phantoms
