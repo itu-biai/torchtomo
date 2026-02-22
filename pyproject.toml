@@ -21,6 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Image Processing",
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
 ]
@@ -30,6 +31,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+    "scikit-image",
+]
 dev = [
     "build",
     "matplotlib",
@@ -41,9 +47,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/biailab/torchtomo"
-Repository = "https://github.com/biailab/torchtomo"
-Issues = "https://github.com/biailab/torchtomo/issues"
+Homepage = "https://github.com/itu-biai/torchtomo"
+Repository = "https://github.com/itu-biai/torchtomo"
+Issues = "https://github.com/itu-biai/torchtomo/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
