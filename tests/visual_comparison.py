@@ -148,25 +148,24 @@ def main():
     angle_counts = [180, 360, 1000]
 
     print("=" * 80)
-    print(f"VISUAL COMPARISON: torchtomo vs scikit-image (512x512)")
+    print("VISUAL COMPARISON: torchtomo vs scikit-image (512x512)")
     print("=" * 80)
 
     for phantom_name, phantom in phantoms.items():
         for n_angles in angle_counts:
             print(f"\n--- {phantom_name} phantom, {n_angles} angles ---")
             results = run_comparison(phantom, phantom_name, size, n_angles)
-            print(
-                f"  scikit-image:  PSNR={results['psnr_sk']:.2f} dB, SSIM={results['ssim_sk']:.4f}"
-            )
-            print(
-                f"  torchtomo:     PSNR={results['psnr_tt']:.2f} dB, SSIM={results['ssim_tt']:.4f}"
-            )
-            print(
-                f"  PSNR gap:      {abs(results['psnr_tt'] - results['psnr_sk']):.2f} dB"
-            )
-            print(
-                f"  Cross-recon:   PSNR={results['recon_psnr']:.2f} dB, SSIM={results['recon_ssim']:.4f}"
-            )
+            psnr_sk = results["psnr_sk"]
+            ssim_sk = results["ssim_sk"]
+            psnr_tt = results["psnr_tt"]
+            ssim_tt = results["ssim_tt"]
+            gap = abs(psnr_tt - psnr_sk)
+            recon_psnr = results["recon_psnr"]
+            recon_ssim = results["recon_ssim"]
+            print(f"  scikit-image:  PSNR={psnr_sk:.2f} dB, SSIM={ssim_sk:.4f}")
+            print(f"  torchtomo:     PSNR={psnr_tt:.2f} dB, SSIM={ssim_tt:.4f}")
+            print(f"  PSNR gap:      {gap:.2f} dB")
+            print(f"  Cross-recon:   PSNR={recon_psnr:.2f} dB, SSIM={recon_ssim:.4f}")
 
             save_path = (
                 f"/home/user/torchtomo/tests/visual_{phantom_name}_{n_angles}angles.png"
