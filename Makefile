@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-PYTHON := python
+PYTHON := python3.11
 VENV := .venv
 
 .PHONY: help
@@ -55,3 +55,10 @@ clean: ## Remove build artifacts
 	rm -rf build/ dist/ *.egg-info/ src/*.egg-info/ __pycache__/ .pytest_cache/ .coverage
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
+
+.PHONY: fresh
+fresh: clean ## Create fresh venv and install from scratch
+	rm -rf $(VENV)
+	$(PYTHON) -m venv $(VENV)
+	$(VENV)/bin/pip install --upgrade pip
+	$(VENV)/bin/pip install -e ".[dev]"
