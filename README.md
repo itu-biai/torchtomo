@@ -1,9 +1,9 @@
 # TorchTomo
 
-[![PyPI](https://img.shields.io/pypi/v/torchtomo.svg)](https://pypi.org/project/torchtomo/)
-[![Changelog](https://img.shields.io/github/v/release/itu-biai/torchtomo?include_prereleases&label=changelog)](https://github.com/itu-biai/torchtomo/releases)
+[![PyPI](https://img.shields.io/pypi/v/torchtomo.svg?cacheSeconds=300)](https://pypi.org/project/torchtomo/)
+[![Changelog](https://img.shields.io/badge/changelog-releases-blue)](https://github.com/itu-biai/torchtomo/releases)
 [![Tests](https://github.com/itu-biai/torchtomo/actions/workflows/test.yml/badge.svg)](https://github.com/itu-biai/torchtomo/actions/workflows/test.yml)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/itu-biai/torchtomo/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-CC%20BY--NC%204.0-blue.svg)](https://github.com/itu-biai/torchtomo/blob/main/LICENSE)
 
 Differentiable CT reconstruction primitives in pure PyTorch.
 
@@ -109,4 +109,5 @@ make build
 
 ## License
 
-MIT
+Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0).  
+Commercial use by third parties requires prior written permission from the authors.
