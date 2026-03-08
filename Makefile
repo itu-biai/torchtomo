@@ -5,7 +5,7 @@ PYTHON ?= $(if $(wildcard $(VENV)/bin/python),$(VENV)/bin/python,python3)
 PIP := $(PYTHON) -m pip
 PYTEST := PYTHONPATH=src $(PYTHON) -m pytest
 RUFF := $(PYTHON) -m ruff
-BUILD := $(PYTHON) -m build --no-isolation
+BUILD := $(PYTHON) -m build
 TWINE := $(PYTHON) -m twine
 
 .PHONY: help
@@ -19,7 +19,7 @@ venv: ## Create virtual environment
 
 .PHONY: install
 install: ## Install package in development mode
-	$(PIP) install --no-build-isolation -e ".[dev]"
+	$(PIP) install -e ".[dev]"
 
 .PHONY: format
 format: ## Format source code
@@ -66,4 +66,4 @@ fresh: clean ## Create fresh venv and install from scratch
 	rm -rf $(VENV)
 	python3 -m venv $(VENV)
 	$(VENV)/bin/python -m pip install --upgrade pip
-	$(VENV)/bin/python -m pip install --no-build-isolation -e ".[dev]"
+	$(VENV)/bin/python -m pip install -e ".[dev]"
