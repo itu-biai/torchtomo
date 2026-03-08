@@ -1,7 +1,12 @@
 .DEFAULT_GOAL := help
 
-PYTHON := python3.11
 VENV := .venv
+PYTHON ?= $(if $(wildcard $(VENV)/bin/python),$(VENV)/bin/python,python3)
+PIP := $(PYTHON) -m pip
+PYTEST := PYTHONPATH=src $(PYTHON) -m pytest
+RUFF := $(PYTHON) -m ruff
+BUILD := $(PYTHON) -m build --no-isolation
+TWINE := $(PYTHON) -m twine
 
 .PHONY: help
 help: ## Show this help
@@ -14,41 +19,41 @@ venv: ## Create virtual environment
 
 .PHONY: install
 install: ## Install package in development mode
-	pip install -e ".[dev]"
+	$(PIP) install --no-build-isolation -e ".[dev]"
 
 .PHONY: format
 format: ## Format source code
-	ruff format src tests
+	$(RUFF) format src tests
 
 .PHONY: lint
 lint: ## Lint source code
-	ruff check src tests
+	$(RUFF) check src tests
 
 .PHONY: test
 test: ## Run tests
-	pytest
+	$(PYTEST)
 
 .PHONY: test-cov
 test-cov: ## Run tests with coverage
-	pytest --cov=torchtomo --cov-report=term-missing
+	$(PYTEST) --cov=torchtomo --cov-report=term-missing
 
 .PHONY: check
 check: format lint test ## Run format, lint, and test
 
 .PHONY: build
 build: ## Build distribution packages
-	$(PYTHON) -m build
+	$(BUILD)
 
 .PHONY: ci
 ci: check build ## Run all checks then build
 
 .PHONY: publish-test
 publish-test: build ## Upload to TestPyPI
-	twine upload --repository testpypi dist/*
+	$(TWINE) upload --repository testpypi dist/*
 
 .PHONY: publish
 publish: build ## Upload to PyPI
-	twine upload dist/*
+	$(TWINE) upload dist/*
 
 .PHONY: clean
 clean: ## Remove build artifacts
@@ -59,6 +64,6 @@ clean: ## Remove build artifacts
 .PHONY: fresh
 fresh: clean ## Create fresh venv and install from scratch
 	rm -rf $(VENV)
-	$(PYTHON) -m venv $(VENV)
-	$(VENV)/bin/pip install --upgrade pip
-	$(VENV)/bin/pip install -e ".[dev]"
+	python3 -m venv $(VENV)
+	$(VENV)/bin/python -m pip install --upgrade pip
+	$(VENV)/bin/python -m pip install --no-build-isolation -e ".[dev]"
