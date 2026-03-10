@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 """Generate visualization of torchtomo reconstruction quality."""
 
-import torch
 import matplotlib.pyplot as plt
-import numpy as np
 from skimage.metrics import (
-    structural_similarity as ssim,
     peak_signal_noise_ratio as psnr,
 )
+from skimage.metrics import (
+    structural_similarity as ssim,
+)
 
-from torchtomo import ParallelBeam, FanBeam, shepp_logan
+from torchtomo import FanBeam, ParallelBeam, shepp_logan
 
 
 def compute_metrics(recon, phantom):

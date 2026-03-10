@@ -109,7 +109,7 @@ def benchmark_skimage(img_sizes, n_angles=180):
         sino_sk = radon(phantom_np, theta=theta)
         fbp_rate = bench(lambda: iradon(sino_sk, theta=theta, filter_name="ramp"))
 
-        print(f"\nParallel Beam (single slice):")
+        print("\nParallel Beam (single slice):")
         print(f"  Forward:  {fwd_rate:>8.1f} slices/sec")
         print(f"  FBP:      {fbp_rate:>8.1f} slices/sec")
 
@@ -145,12 +145,12 @@ def benchmark_torchradon(img_sizes, batch_sizes):
         fwd_rate = bench(lambda: (tr.forward(phantom), torch.cuda.synchronize()))
         bp_rate = bench(lambda: (tr.backprojection(sinogram), torch.cuda.synchronize()))
 
-        print(f"\nParallel Beam (single slice):")
+        print("\nParallel Beam (single slice):")
         print(f"  Forward:         {fwd_rate:>8.1f} slices/sec")
         print(f"  Backprojection:  {bp_rate:>8.1f} slices/sec")
 
         # Batch benchmarks (parallel beam)
-        print(f"\nBatch Forward Projection (Parallel Beam):")
+        print("\nBatch Forward Projection (Parallel Beam):")
         for batch_size in batch_sizes:
             try:
                 batch = phantom.expand(batch_size, -1, -1, -1).clone()
@@ -179,7 +179,7 @@ def benchmark_torchradon(img_sizes, batch_sizes):
         fan_fwd = bench(lambda: (tr_fan.forward(phantom), torch.cuda.synchronize()))
         fan_bp = bench(lambda: (tr_fan.backprojection(sino_fan), torch.cuda.synchronize()))
 
-        print(f"\nFan Beam (single slice):")
+        print("\nFan Beam (single slice):")
         print(f"  Forward:         {fan_fwd:>8.1f} slices/sec")
         print(f"  Backprojection:  {fan_bp:>8.1f} slices/sec")
 
@@ -206,7 +206,7 @@ def benchmark_torchtomo(img_sizes, batch_sizes, devices):
             fwd_rate = benchmark_forward(projector, phantom, device)
             fbp_rate = benchmark_fbp(projector, sinogram, device)
 
-            print(f"\nParallel Beam (single slice):")
+            print("\nParallel Beam (single slice):")
             print(f"  Forward:  {fwd_rate:>8.1f} slices/sec")
             print(f"  FBP:      {fbp_rate:>8.1f} slices/sec")
 
@@ -223,12 +223,12 @@ def benchmark_torchtomo(img_sizes, batch_sizes, devices):
             fwd_rate = benchmark_forward(projector, phantom, device)
             fbp_rate = benchmark_fbp(projector, sinogram, device)
 
-            print(f"\nFan Beam (single slice):")
+            print("\nFan Beam (single slice):")
             print(f"  Forward:  {fwd_rate:>8.1f} slices/sec")
             print(f"  FBP:      {fbp_rate:>8.1f} slices/sec")
 
             # Batch benchmarks
-            print(f"\nBatch Forward Projection (Parallel Beam):")
+            print("\nBatch Forward Projection (Parallel Beam):")
             projector = ParallelBeam(
                 img_size=img_size,
                 n_angles=180,
@@ -313,7 +313,7 @@ def benchmark_comparison(img_sizes, n_angles=180):
             print(f"  {label:>22} | {fwd_rate:>15.1f} | {fbp_rate:>15.1f}")
 
         print()
-        print(f"  Speedup vs scikit-image:")
+        print("  Speedup vs scikit-image:")
         for label, fwd_rate, fbp_rate in results[1:]:
             print(f"    {label}: forward {fwd_rate / sk_fwd:.1f}x, BP/FBP {fbp_rate / sk_fbp:.1f}x")
 

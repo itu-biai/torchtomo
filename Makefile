@@ -53,7 +53,7 @@ build: ## Build distribution packages
 	$(BUILD)
 
 .PHONY: ci
-ci: check benchmark build ## Run all checks, benchmarks, then build
+ci: check build ## Run all checks, then build
 
 .PHONY: publish-test
 publish-test: build ## Upload to TestPyPI
