@@ -163,10 +163,7 @@ class TestFBPConsistency:
 
         # Gap should be small
         gap = abs(ssim_tt - ssim_sk)
-        assert gap < 0.15, (
-            f"{phantom_name}: SSIM gap {gap:.4f} > 0.15 "
-            f"(skimage={ssim_sk:.4f}, torchtomo={ssim_tt:.4f})"
-        )
+        assert gap < 0.15, f"{phantom_name}: SSIM gap {gap:.4f} > 0.15 (skimage={ssim_sk:.4f}, torchtomo={ssim_tt:.4f})"
 
 
 class TestReconstructionSimilarity:
@@ -216,9 +213,7 @@ class TestReconstructionSimilarity:
 class TestFilterConsistency:
     """Compare FBP with different filters between torchtomo and scikit-image."""
 
-    @pytest.mark.parametrize(
-        "filter_name", ["ramp", "shepp-logan", "cosine", "hamming", "hann"]
-    )
+    @pytest.mark.parametrize("filter_name", ["ramp", "shepp-logan", "cosine", "hamming", "hann"])
     @pytest.mark.parametrize("n_angles", [180, 360, 1000])
     def test_filter_reconstruction_gap(self, filter_name, n_angles):
         """Each filter should produce similar results in both libraries."""
@@ -227,26 +222,18 @@ class TestFilterConsistency:
         theta_deg = np.linspace(0, 180, n_angles, endpoint=False)
 
         sino_sk = radon(phantom, theta=theta_deg)
-        recon_sk = np.clip(
-            iradon(sino_sk, theta=theta_deg, filter_name=filter_name), 0, 1
-        )
+        recon_sk = np.clip(iradon(sino_sk, theta=theta_deg, filter_name=filter_name), 0, 1)
 
         phantom_t = torch.from_numpy(phantom).unsqueeze(0).unsqueeze(0)
         projector = ParallelBeam(img_size=size, n_angles=n_angles, n_det=size)
-        recon_tt = (
-            projector.fbp(projector.forward(phantom_t), filter_name=filter_name)
-            .clamp(0, 1)
-            .squeeze()
-            .numpy()
-        )
+        recon_tt = projector.fbp(projector.forward(phantom_t), filter_name=filter_name).clamp(0, 1).squeeze().numpy()
 
         psnr_sk = psnr(phantom, recon_sk, data_range=1.0)
         psnr_tt = psnr(phantom, recon_tt, data_range=1.0)
         gap = abs(psnr_tt - psnr_sk)
 
         assert gap < 3.0, (
-            f"Filter '{filter_name}': PSNR gap {gap:.2f} dB > 3 dB "
-            f"(skimage={psnr_sk:.2f}, torchtomo={psnr_tt:.2f})"
+            f"Filter '{filter_name}': PSNR gap {gap:.2f} dB > 3 dB (skimage={psnr_sk:.2f}, torchtomo={psnr_tt:.2f})"
         )
 
     @pytest.mark.parametrize("filter_name", ["ramp", "cosine", "hamming", "hann"])
@@ -258,23 +245,14 @@ class TestFilterConsistency:
         theta_deg = np.linspace(0, 180, n_angles, endpoint=False)
 
         sino_sk = radon(phantom, theta=theta_deg)
-        recon_sk = np.clip(
-            iradon(sino_sk, theta=theta_deg, filter_name=filter_name), 0, 1
-        )
+        recon_sk = np.clip(iradon(sino_sk, theta=theta_deg, filter_name=filter_name), 0, 1)
 
         phantom_t = torch.from_numpy(phantom).unsqueeze(0).unsqueeze(0)
         projector = ParallelBeam(img_size=size, n_angles=n_angles, n_det=size)
-        recon_tt = (
-            projector.fbp(projector.forward(phantom_t), filter_name=filter_name)
-            .clamp(0, 1)
-            .squeeze()
-            .numpy()
-        )
+        recon_tt = projector.fbp(projector.forward(phantom_t), filter_name=filter_name).clamp(0, 1).squeeze().numpy()
 
         recon_ssim = ssim(recon_sk, recon_tt, data_range=1.0)
-        assert recon_ssim > 0.7, (
-            f"Filter '{filter_name}': reconstruction SSIM {recon_ssim:.4f} < 0.7"
-        )
+        assert recon_ssim > 0.7, f"Filter '{filter_name}': reconstruction SSIM {recon_ssim:.4f} < 0.7"
 
 
 class TestAngularConvergence:
@@ -293,28 +271,19 @@ class TestAngularConvergence:
             theta_deg = np.linspace(0, 180, n_angles, endpoint=False)
 
             sino_sk = radon(phantom, theta=theta_deg)
-            recon_sk = np.clip(
-                iradon(sino_sk, theta=theta_deg, filter_name="ramp"), 0, 1
-            )
+            recon_sk = np.clip(iradon(sino_sk, theta=theta_deg, filter_name="ramp"), 0, 1)
 
             projector = ParallelBeam(img_size=size, n_angles=n_angles, n_det=size)
-            recon_tt = (
-                projector.fbp(projector.forward(phantom_t))
-                .clamp(0, 1)
-                .squeeze()
-                .numpy()
-            )
+            recon_tt = projector.fbp(projector.forward(phantom_t)).clamp(0, 1).squeeze().numpy()
 
             psnr_sk = psnr(phantom, recon_sk, data_range=1.0)
             psnr_tt = psnr(phantom, recon_tt, data_range=1.0)
 
             assert psnr_sk >= prev_psnr_sk, (
-                f"skimage PSNR decreased from {prev_psnr_sk:.2f} to {psnr_sk:.2f} "
-                f"when going to {n_angles} angles"
+                f"skimage PSNR decreased from {prev_psnr_sk:.2f} to {psnr_sk:.2f} when going to {n_angles} angles"
             )
             assert psnr_tt >= prev_psnr_tt, (
-                f"torchtomo PSNR decreased from {prev_psnr_tt:.2f} to {psnr_tt:.2f} "
-                f"when going to {n_angles} angles"
+                f"torchtomo PSNR decreased from {prev_psnr_tt:.2f} to {psnr_tt:.2f} when going to {n_angles} angles"
             )
 
             prev_psnr_sk = psnr_sk

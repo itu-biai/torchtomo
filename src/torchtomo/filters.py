@@ -2,11 +2,71 @@
 
 from typing import Literal
 
-import numpy as np
 import torch
 import torch.fft as fft
 
 FilterType = Literal["ramp", "shepp-logan", "cosine", "hamming", "hann", "none"]
+_FILTER_CACHE: dict[tuple[int, FilterType, bool, str, int | None, torch.dtype], torch.Tensor] = {}
+
+
+def _filter_cache_key(
+    size: int,
+    filter_name: FilterType,
+    device: torch.device | None,
+    dtype: torch.dtype,
+    real_fft: bool,
+) -> tuple[int, FilterType, bool, str, int | None, torch.dtype]:
+    if device is None:
+        return (size, filter_name, real_fft, "cpu", None, dtype)
+    return (size, filter_name, real_fft, device.type, device.index, dtype)
+
+
+def _build_filter(
+    size: int,
+    filter_name: FilterType,
+    device: torch.device | None,
+    dtype: torch.dtype,
+    *,
+    real_fft: bool,
+) -> torch.Tensor:
+    if filter_name == "none":
+        length = size // 2 + 1 if real_fft else size
+        return torch.ones(length, device=device, dtype=dtype)
+
+    freq_fn = fft.rfftfreq if real_fft else fft.fftfreq
+    freq = freq_fn(size, d=1.0, device=device, dtype=torch.float32)
+    ramp = freq.abs()
+
+    if filter_name == "ramp":
+        filt = ramp
+    elif filter_name == "shepp-logan":
+        filt = ramp * torch.sinc(2 * freq)
+    elif filter_name == "cosine":
+        filt = ramp * torch.cos(torch.pi * freq)
+    elif filter_name == "hamming":
+        filt = ramp * (0.54 + 0.46 * torch.cos(2 * torch.pi * freq))
+    elif filter_name == "hann":
+        filt = ramp * (0.5 + 0.5 * torch.cos(2 * torch.pi * freq))
+    else:
+        raise ValueError(f"Unknown filter: {filter_name}")
+
+    return filt.to(dtype=dtype)
+
+
+def _get_cached_filter(
+    size: int,
+    filter_name: FilterType,
+    device: torch.device | None,
+    dtype: torch.dtype,
+    *,
+    real_fft: bool,
+) -> torch.Tensor:
+    key = _filter_cache_key(size, filter_name, device, dtype, real_fft)
+    filt = _FILTER_CACHE.get(key)
+    if filt is None:
+        filt = _build_filter(size, filter_name, device, dtype, real_fft=real_fft)
+        _FILTER_CACHE[key] = filt
+    return filt
 
 
 def get_filter(
@@ -27,37 +87,7 @@ def get_filter(
     Returns:
         Filter in frequency domain, shape [size]
     """
-    if filter_name == "none":
-        return torch.ones(size, device=device, dtype=dtype)
-
-    # Frequency axis: fftfreq gives [-0.5, 0.5) normalized frequencies
-    freq = np.fft.fftfreq(size).astype(np.float64)
-
-    # Ramp filter: |f| scaled to detector spacing
-    # In FBP, the filter is |omega| = 2*pi*|f|, but with discrete sampling
-    # we use |f| directly and scale appropriately
-    ramp = np.abs(freq)
-
-    if filter_name == "ramp":
-        filt = ramp
-    elif filter_name == "shepp-logan":
-        # sinc window (avoids division by zero)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            window = np.sinc(2 * freq)  # sinc(2f) = sin(2*pi*f)/(2*pi*f)
-        filt = ramp * window
-    elif filter_name == "cosine":
-        filt = ramp * np.cos(np.pi * freq)
-    elif filter_name == "hamming":
-        filt = ramp * (0.54 + 0.46 * np.cos(2 * np.pi * freq))
-    elif filter_name == "hann":
-        filt = ramp * (0.5 + 0.5 * np.cos(2 * np.pi * freq))
-    else:
-        raise ValueError(f"Unknown filter: {filter_name}")
-
-    # Convert to torch tensor
-    filt = torch.from_numpy(filt.astype(np.float32)).to(device=device, dtype=dtype)
-
-    return filt
+    return _get_cached_filter(size, filter_name, device, dtype, real_fft=False)
 
 
 def apply_filter(
@@ -82,21 +112,16 @@ def apply_filter(
     dtype = sinogram.dtype
 
     # Pad to next power of 2 for efficient FFT (and to avoid circular conv)
-    pad_len = max(64, int(2 ** np.ceil(np.log2(2 * n_det))))
+    pad_len = max(64, 1 << (2 * n_det - 1).bit_length())
 
-    # Get filter
-    filt = get_filter(pad_len, filter_name, device=device, dtype=dtype)
+    filt = _get_cached_filter(pad_len, filter_name, device=device, dtype=dtype, real_fft=True)
 
-    # FFT of sinogram with zero-padding
-    sino_fft = fft.fft(sinogram, n=pad_len, dim=-1)
+    sino_fft = fft.rfft(sinogram, n=pad_len, dim=-1)
 
-    # Apply filter in frequency domain
     filtered_fft = sino_fft * filt.view(1, 1, 1, -1)
 
-    # Inverse FFT
-    filtered = fft.ifft(filtered_fft, dim=-1).real
+    filtered = fft.irfft(filtered_fft, n=pad_len, dim=-1)
 
-    # Crop to original size
     filtered = filtered[..., :n_det]
 
     return filtered

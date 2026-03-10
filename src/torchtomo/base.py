@@ -30,11 +30,16 @@ class BaseProjector(nn.Module, ABC):
         self.n_angles = n_angles
         self.n_det = n_det
         self.angle_range = angle_range
-
-        angles = torch.linspace(
-            angle_range[0], angle_range[1], n_angles, dtype=torch.float32
-        )
+        self.angle_step = (angle_range[1] - angle_range[0]) / n_angles
+        angles = torch.linspace(angle_range[0], angle_range[1], n_angles, dtype=torch.float32)
         self.register_buffer("angles", angles)
+
+    def _angle_chunk_size(self, batch_size: int, work_items: int, device: torch.device) -> int:
+        """Bound per-call tensor expansion while still batching angles."""
+        target_items = 1 << (24 if device.type != "cpu" else 22)
+        per_angle_items = max(1, batch_size * work_items)
+        chunk = target_items // per_angle_items
+        return max(1, min(self.n_angles, chunk))
 
     @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -81,9 +86,4 @@ class BaseProjector(nn.Module, ABC):
         pass
 
     def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}("
-            f"img_size={self.img_size}, "
-            f"n_angles={self.n_angles}, "
-            f"n_det={self.n_det})"
-        )
+        return f"{self.__class__.__name__}(img_size={self.img_size}, n_angles={self.n_angles}, n_det={self.n_det})"

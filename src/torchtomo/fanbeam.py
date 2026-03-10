@@ -90,9 +90,7 @@ class FanBeam(BaseProjector):
         self.register_buffer("backward_grids", back_grids)
         self.register_buffer("backward_weights", weights)
 
-        det_pos = torch.linspace(
-            -self._det_width_norm / 2, self._det_width_norm / 2, n_det
-        )
+        det_pos = torch.linspace(-self._det_width_norm / 2, self._det_width_norm / 2, n_det)
         D = self._src_dist_norm + self._det_dist_norm
         cos_weight = D / torch.sqrt(D**2 + det_pos**2)
         self.register_buffer("cos_weight", cos_weight)
@@ -121,9 +119,7 @@ class FanBeam(BaseProjector):
 
         return torch.stack(all_grids), torch.stack(all_lengths)
 
-    def _compute_rays_for_angle(
-        self, angle: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def _compute_rays_for_angle(self, angle: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute ray sampling points for a single angle.
 
@@ -146,9 +142,7 @@ class FanBeam(BaseProjector):
         det_dir_x = cos_a
         det_dir_y = sin_a
 
-        det_offsets = torch.linspace(
-            -self._det_width_norm / 2, self._det_width_norm / 2, self.n_det
-        )
+        det_offsets = torch.linspace(-self._det_width_norm / 2, self._det_width_norm / 2, self.n_det)
 
         det_x = det_cx + det_offsets * det_dir_x
         det_y = det_cy + det_offsets * det_dir_y
@@ -272,32 +266,36 @@ class FanBeam(BaseProjector):
             Sinogram [B, 1, n_angles, n_det]
         """
         B = x.shape[0]
-        device = x.device
 
         if self.circle:
             x = x * self.circle_mask.view(1, 1, self.img_size, self.img_size)
 
         projections = []
+        chunk_size = self._angle_chunk_size(B, self.n_det * self.n_samples, x.device)
 
-        for i in range(self.n_angles):
-            grid = self.ray_grids[i]
-            ray_len = self.ray_lengths[i]
-
-            grid = grid.unsqueeze(0).expand(B, -1, -1, -1).to(device)
+        for start in range(0, self.n_angles, chunk_size):
+            end = min(start + chunk_size, self.n_angles)
+            angle_count = end - start
+            grid = self.ray_grids[start:end]
+            grid = grid.unsqueeze(0).expand(B, -1, -1, -1, -1)
+            grid = grid.reshape(B * angle_count, self.n_det, self.n_samples, 2)
+            batch = x.unsqueeze(1).expand(-1, angle_count, -1, -1, -1)
+            batch = batch.reshape(B * angle_count, 1, self.img_size, self.img_size)
 
             samples = F.grid_sample(
-                x,
+                batch,
                 grid,
                 mode="bilinear",
                 padding_mode="zeros",
                 align_corners=True,
             )
 
-            projection = samples.mean(dim=-1)
-            projection = projection * ray_len.view(1, 1, -1).to(device)
-            projections.append(projection)
+            projection = samples.mean(dim=-1).reshape(B, angle_count, 1, self.n_det)
+            ray_len = self.ray_lengths[start:end].view(1, angle_count, 1, self.n_det)
+            projection = projection * ray_len
+            projections.append(projection.permute(0, 2, 1, 3))
 
-        sinogram = torch.stack(projections, dim=2)
+        sinogram = torch.cat(projections, dim=2)
 
         return sinogram
 
@@ -312,35 +310,31 @@ class FanBeam(BaseProjector):
             Back-projected image [B, 1, H, W]
         """
         B = sinogram.shape[0]
-        device = sinogram.device
+        recon = torch.zeros(B, 1, self.img_size, self.img_size, device=sinogram.device)
+        chunk_size = self._angle_chunk_size(B, self.img_size * self.img_size, sinogram.device)
 
-        recon = torch.zeros(B, 1, self.img_size, self.img_size, device=device)
+        for start in range(0, self.n_angles, chunk_size):
+            end = min(start + chunk_size, self.n_angles)
+            angle_count = end - start
 
-        for i in range(self.n_angles):
-            # Sinogram row [B, 1, 1, n_det]
-            sino_row = sinogram[:, :, i : i + 1, :]
+            sino_rows = sinogram[:, :, start:end, :]
+            sino_rows = sino_rows.permute(0, 2, 1, 3).reshape(B * angle_count, 1, 1, self.n_det)
+            grid = self.backward_grids[start:end]
+            grid = grid.unsqueeze(0).expand(B, -1, -1, -1, -1)
+            grid = grid.reshape(B * angle_count, self.img_size, self.img_size, 2)
 
-            # Sampling grid
-            grid = self.backward_grids[i].unsqueeze(0).expand(B, -1, -1, -1)
-            grid = grid.to(device)
-
-            # Sample
             contribution = F.grid_sample(
-                sino_row,
+                sino_rows,
                 grid,
                 mode="bilinear",
                 padding_mode="zeros",
                 align_corners=True,
             )
+            contribution = contribution.reshape(B, angle_count, 1, self.img_size, self.img_size)
+            weight = self.backward_weights[start:end].view(1, angle_count, 1, self.img_size, self.img_size)
+            recon += (contribution * weight).sum(dim=1)
 
-            # Apply distance weighting
-            weight = self.backward_weights[i].view(1, 1, self.img_size, self.img_size)
-            weight = weight.to(device)
-
-            recon += contribution * weight
-
-        delta_beta = (self.angle_range[1] - self.angle_range[0]) / self.n_angles
-        recon = recon * delta_beta / 2
+        recon = recon * self.angle_step / 2
 
         # Circle mask
         if self.circle:
@@ -348,9 +342,7 @@ class FanBeam(BaseProjector):
 
         return recon
 
-    def fbp(
-        self, sinogram: torch.Tensor, filter_name: FilterType = "ramp"
-    ) -> torch.Tensor:
+    def fbp(self, sinogram: torch.Tensor, filter_name: FilterType = "ramp") -> torch.Tensor:
         """
         Filtered back-projection for fan beam with flat detector.
 
@@ -361,7 +353,7 @@ class FanBeam(BaseProjector):
         Returns:
             Reconstructed image [B, 1, H, W]
         """
-        cos_w = self.cos_weight.view(1, 1, 1, -1).to(sinogram.device)
+        cos_w = self.cos_weight.view(1, 1, 1, -1)
         weighted_sino = sinogram * cos_w
 
         filtered_sino = apply_filter(weighted_sino, filter_name)

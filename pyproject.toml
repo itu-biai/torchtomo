@@ -34,7 +34,11 @@ dependencies = [
 test = [
     "pytest",
     "pytest-cov",
+]
+benchmark = [
+    "pytest",
     "scikit-image",
+    "torch-radon",
 ]
 dev = [
     "build",
@@ -42,7 +46,6 @@ dev = [
     "pytest",
     "pytest-cov",
     "ruff",
-    "scikit-image",
     "twine",
 ]
 
@@ -56,7 +59,7 @@ License = "https://creativecommons.org/licenses/by-nc/4.0/"
 where = ["src"]
 
 [tool.ruff]
-line-length = 88
+line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]

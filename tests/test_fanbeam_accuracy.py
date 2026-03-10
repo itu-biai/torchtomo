@@ -2,9 +2,15 @@
 
 import numpy as np
 import torch
-from skimage.metrics import peak_signal_noise_ratio as psnr
 
 from torchtomo import FanBeam, ParallelBeam, shepp_logan
+
+
+def _psnr(truth, recon, data_range=1.0):
+    mse = float(np.mean((truth - recon) ** 2))
+    if mse == 0:
+        return float("inf")
+    return 10.0 * np.log10(data_range**2 / mse)
 
 
 def _make_disc_phantom(size=128, radius=0.3):
@@ -35,9 +41,7 @@ def _analytic_disc_sinogram(projector: FanBeam, radius: float) -> torch.Tensor:
     src_dist = projector.src_dist * scale
     det_dist = projector.det_dist * scale
     det_width = projector.det_width * scale
-    det_offsets = np.linspace(
-        -det_width / 2, det_width / 2, projector.n_det, dtype=np.float64
-    )
+    det_offsets = np.linspace(-det_width / 2, det_width / 2, projector.n_det, dtype=np.float64)
 
     sinogram = np.zeros((projector.n_angles, projector.n_det), dtype=np.float32)
 
@@ -94,9 +98,7 @@ class TestFanBeamAccuracy:
         peak = sino_ref.max()
 
         assert corr > 0.999, f"Fan-beam sinogram correlation {corr:.6f} < 0.999"
-        assert rmse / peak < 0.01, (
-            f"Fan-beam sinogram relative RMSE {(rmse / peak):.4f} >= 0.01"
-        )
+        assert rmse / peak < 0.01, f"Fan-beam sinogram relative RMSE {(rmse / peak):.4f} >= 0.01"
 
     def test_fbp_reconstructs_analytic_disc(self):
         size = 128
@@ -122,14 +124,12 @@ class TestFanBeamAccuracy:
         )
         recon = projector.fbp(sino_ref).clamp(0, 1).squeeze().numpy()
 
-        recon_psnr = psnr(phantom, recon, data_range=1.0)
+        recon_psnr = _psnr(phantom, recon, data_range=1.0)
         recon_mask = recon >= 0.5
         truth_mask = phantom >= 0.5
         dice = _dice_score(recon_mask, truth_mask)
 
-        assert recon_psnr > 31.0, (
-            f"Analytic fan-beam disc PSNR {recon_psnr:.2f} dB < 31"
-        )
+        assert recon_psnr > 31.0, f"Analytic fan-beam disc PSNR {recon_psnr:.2f} dB < 31"
         assert dice > 0.995, f"Analytic fan-beam disc Dice {dice:.4f} < 0.995"
 
     def test_round_trip_quality_tracks_parallel_beam(self):
@@ -154,12 +154,9 @@ class TestFanBeamAccuracy:
             recon_parallel = parallel.fbp(parallel.forward(phantom_t)).clamp(0, 1)
             recon_fan = fan.fbp(fan.forward(phantom_t)).clamp(0, 1)
 
-            psnr_parallel = psnr(
-                phantom, recon_parallel.squeeze().numpy(), data_range=1.0
-            )
-            psnr_fan = psnr(phantom, recon_fan.squeeze().numpy(), data_range=1.0)
+            psnr_parallel = _psnr(phantom, recon_parallel.squeeze().numpy(), data_range=1.0)
+            psnr_fan = _psnr(phantom, recon_fan.squeeze().numpy(), data_range=1.0)
 
             assert psnr_fan >= psnr_parallel - 3.0, (
-                f"{name} fan-beam PSNR {psnr_fan:.2f} dB is more than 3 dB below "
-                f"parallel-beam {psnr_parallel:.2f} dB"
+                f"{name} fan-beam PSNR {psnr_fan:.2f} dB is more than 3 dB below parallel-beam {psnr_parallel:.2f} dB"
             )

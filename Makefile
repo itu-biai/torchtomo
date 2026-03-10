@@ -23,11 +23,11 @@ install: ## Install package in development mode
 
 .PHONY: format
 format: ## Format source code
-	$(RUFF) format src tests
+	$(RUFF) format src tests benchmark
 
 .PHONY: lint
 lint: ## Lint source code
-	$(RUFF) check src tests
+	$(RUFF) check src tests benchmark
 
 .PHONY: test
 test: ## Run tests
@@ -37,6 +37,14 @@ test: ## Run tests
 test-cov: ## Run tests with coverage
 	$(PYTEST) --cov=torchtomo --cov-report=term-missing
 
+.PHONY: benchmark
+benchmark: ## Run benchmark tests (requires benchmark extras)
+	$(PYTEST) benchmark/
+
+.PHONY: benchmark-speed
+benchmark-speed: ## Run speed benchmarks (requires benchmark extras)
+	PYTHONPATH=src $(PYTHON) benchmark/benchmark_speed.py
+
 .PHONY: check
 check: format lint test ## Run format, lint, and test
 
@@ -45,7 +53,7 @@ build: ## Build distribution packages
 	$(BUILD)
 
 .PHONY: ci
-ci: check build ## Run all checks then build
+ci: check benchmark build ## Run all checks, benchmarks, then build
 
 .PHONY: publish-test
 publish-test: build ## Upload to TestPyPI

@@ -102,22 +102,16 @@ def plot_comparison(phantom, results, phantom_name, n_angles, save_path):
 
     # Row 2: Reconstructions and difference
     axes[1, 0].imshow(r["recon_sk"], cmap="gray")
-    axes[1, 0].set_title(
-        f"FBP (scikit-image)\nPSNR={r['psnr_sk']:.2f} dB, SSIM={r['ssim_sk']:.4f}"
-    )
+    axes[1, 0].set_title(f"FBP (scikit-image)\nPSNR={r['psnr_sk']:.2f} dB, SSIM={r['ssim_sk']:.4f}")
     axes[1, 0].axis("off")
 
     axes[1, 1].imshow(r["recon_tt"], cmap="gray")
-    axes[1, 1].set_title(
-        f"FBP (torchtomo)\nPSNR={r['psnr_tt']:.2f} dB, SSIM={r['ssim_tt']:.4f}"
-    )
+    axes[1, 1].set_title(f"FBP (torchtomo)\nPSNR={r['psnr_tt']:.2f} dB, SSIM={r['ssim_tt']:.4f}")
     axes[1, 1].axis("off")
 
     recon_diff = np.abs(r["recon_sk"] - r["recon_tt"])
     im2 = axes[1, 2].imshow(recon_diff, cmap="hot")
-    axes[1, 2].set_title(
-        f"|Recon Difference|\nPSNR={r['recon_psnr']:.2f} dB, SSIM={r['recon_ssim']:.4f}"
-    )
+    axes[1, 2].set_title(f"|Recon Difference|\nPSNR={r['recon_psnr']:.2f} dB, SSIM={r['recon_ssim']:.4f}")
     axes[1, 2].axis("off")
     plt.colorbar(im2, ax=axes[1, 2], fraction=0.046)
 
@@ -125,9 +119,7 @@ def plot_comparison(phantom, results, phantom_name, n_angles, save_path):
     err_sk = np.abs(phantom - r["recon_sk"])
     err_tt = np.abs(phantom - r["recon_tt"])
     vmax = max(err_sk.max(), err_tt.max())
-    im3 = axes[1, 3].imshow(
-        err_tt - err_sk, cmap="RdBu_r", vmin=-vmax / 2, vmax=vmax / 2
-    )
+    im3 = axes[1, 3].imshow(err_tt - err_sk, cmap="RdBu_r", vmin=-vmax / 2, vmax=vmax / 2)
     axes[1, 3].set_title("Error diff (torchtomo - skimage)\nRed=torchtomo worse")
     axes[1, 3].axis("off")
     plt.colorbar(im3, ax=axes[1, 3], fraction=0.046)
@@ -167,9 +159,7 @@ def main():
             print(f"  PSNR gap:      {gap:.2f} dB")
             print(f"  Cross-recon:   PSNR={recon_psnr:.2f} dB, SSIM={recon_ssim:.4f}")
 
-            save_path = (
-                f"/home/user/torchtomo/tests/visual_{phantom_name}_{n_angles}angles.png"
-            )
+            save_path = f"/home/user/torchtomo/tests/visual_{phantom_name}_{n_angles}angles.png"
             plot_comparison(phantom, results, phantom_name, n_angles, save_path)
 
     print("\n" + "=" * 80)
