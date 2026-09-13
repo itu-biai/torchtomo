@@ -7,7 +7,7 @@
 
 Differentiable CT reconstruction primitives in pure PyTorch.
 
-TorchTomo provides forward projection, adjoint backprojection, and filtered backprojection for parallel-beam and fan-beam geometries, with support for CPU, CUDA, and Apple Silicon (MPS).
+TorchTomo provides forward projection, an exact discrete adjoint, analytical backprojection, and filtered backprojection for parallel-beam and fan-beam geometries, with support for CPU, CUDA, and Apple Silicon (MPS).
 
 ## Features
 
@@ -71,12 +71,67 @@ loss = F.mse_loss(projector.forward(x), y)
 loss.backward()  # gradients flow through projection operators
 ```
 
+## Discrete Adjoint and Learned Primal-Dual
+
+Use `projector.backward(y)` (or its equivalent `projector.adjoint(y)`) for the transpose of the
+implemented forward operator, including in Learned Primal-Dual (LPD) updates.
+For ordinary Euclidean tensor inner products it satisfies, up to floating-point
+roundoff:
+
+```math
+\langle A x, y \rangle = \langle x, A^T y \rangle.
+```
+
+```python
+projector = ParallelBeam(img_size=32, n_angles=45).double()
+x = torch.randn(1, 1, 32, 32, dtype=torch.float64)
+y = torch.randn(1, 1, 45, 32, dtype=torch.float64, requires_grad=True)
+
+ax = projector(x)
+aty = projector.backward(y)
+torch.testing.assert_close((ax * y).sum(), (x * aty).sum())
+
+aty.square().mean().backward()  # gradients reach y and upstream dual networks
+```
+
+**Migration:** `backward(y)` now computes the exact discrete adjoint. The previous
+analytical backprojection is available as `backproject(y)` and is still used by
+`fbp()`. It includes angular normalization and, for fan-beam geometry, distance weights.
+Its detector interpolation is not the transpose of the forward image sampling,
+so a global scale correction does not generally turn it into the discrete
+adjoint. Existing FBP behavior is preserved. Code or trained checkpoints relying
+on the old `backward()` values should use `backproject()` to preserve those values.
+LPD code can continue to use `forward()`/`backward()` as a matched pair; existing
+models may need retraining or step-size retuning after the operator change.
+
+The adjoint evaluates a temporary forward vector-Jacobian product (VJP), then
+uses the explicit training gradient $g \mapsto A g$. This avoids requiring
+second derivatives of `grid_sample`, which are unavailable in some PyTorch
+versions. It supports `torch.no_grad()` and `torch.inference_mode()` evaluation.
+On MPS, bilinear sampling uses differentiable `gather` operations because some
+PyTorch versions also lack the first backward derivative of `grid_sample` on
+that device. Computation stays on MPS without requiring CPU fallback.
+Geometry is fixed and must not change between evaluation and backpropagation;
+geometry gradients are not supported. Match projector and input device/dtype.
+The temporary forward graph can use more memory and time than the analytical
+backprojection; profile representative LPD batch sizes before large runs.
+
+For adjoint diagnostics, prefer float64 and report an aggregate residual as well
+as per-pair relative errors: near-zero inner products can make the latter large
+even for a correct adjoint. A reproducible 500-pair comparison is available with:
+
+```bash
+PYTHONPATH=src python benchmark/benchmark_adjoint.py --pairs 500 --dtype float64
+```
+
 ## API Snapshot
 
 - `ParallelBeam(...)`
 - `FanBeam(...)`
 - `projector.forward(image)`
-- `projector.backward(sinogram)`
+- `projector.backward(sinogram)` — exact discrete adjoint, for LPD/iterative methods
+- `projector.adjoint(sinogram)` — equivalent to `backward(sinogram)`
+- `projector.backproject(sinogram)` — analytical backprojection, used by FBP
 - `projector.fbp(sinogram, filter_name="ramp")`
 - `apply_filter(sinogram, filter_name=...)`
 - `shepp_logan(size=..., device=...)`

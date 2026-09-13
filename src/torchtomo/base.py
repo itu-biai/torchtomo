@@ -6,16 +6,45 @@ import torch
 import torch.nn as nn
 
 
+class _DiscreteAdjoint(torch.autograd.Function):
+    """Transpose a fixed linear projector without differentiating a VJP twice."""
+
+    @staticmethod
+    def forward(ctx, sinogram: torch.Tensor, projector: "BaseProjector") -> torch.Tensor:
+        ctx.projector = projector
+        # The VJP is needed even during evaluation under no_grad/inference_mode.
+        # Its temporary graph is freed here; training uses the explicit rule below.
+        with torch.inference_mode(False), torch.enable_grad():
+            image = torch.zeros(
+                sinogram.shape[0],
+                1,
+                projector.img_size,
+                projector.img_size,
+                device=sinogram.device,
+                dtype=sinogram.dtype,
+                requires_grad=True,
+            )
+            projection = projector.forward(image)
+            return torch.autograd.grad(projection, image, sinogram, create_graph=False)[0]
+
+    @staticmethod
+    def backward(ctx, grad_image: torch.Tensor):
+        # d(A^T y)/dy = A^T, so its reverse-mode product is A grad_image.
+        # This avoids grid_sample double backward on PyTorch versions lacking it.
+        return ctx.projector.forward(grad_image), None
+
+
 class BaseProjector(nn.Module, ABC):
     """
     Abstract base class for CT projectors.
 
     All projectors support:
         - forward(): Image -> Sinogram (Radon transform)
-        - backward(): Sinogram -> Image (Adjoint/back-projection)
+        - backward()/adjoint(): Sinogram -> Image (Exact discrete adjoint)
+        - backproject(): Sinogram -> Image (Analytical backprojection for FBP)
         - fbp(): Filtered back-projection reconstruction
 
-    All operations are differentiable.
+    All operations are differentiable with respect to their tensor inputs.
     """
 
     def __init__(
@@ -54,13 +83,50 @@ class BaseProjector(nn.Module, ABC):
         """
         pass
 
-    @abstractmethod
-    def backward(self, sinogram: torch.Tensor) -> torch.Tensor:
+    def adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
         """
-        Back projection (adjoint): sinogram -> image.
+        Exact discrete adjoint of forward() for Euclidean tensor inner products.
 
-        Note: This is NOT the inverse, just the adjoint operator.
-        For reconstruction, use fbp().
+        For fixed, real, linear geometry, computes A^T y from the forward VJP,
+        including its interpolation, integration weights, and circle mask.
+        No angular normalization or FBP weighting is added. Equality of inner
+        products holds up to floating-point roundoff.
+
+        Differentiable with respect to sinogram, with backward gradient A g,
+        so this operator can be used inside Learned Primal-Dual networks.
+        Geometry must remain fixed between evaluation and backpropagation;
+        gradients with respect to geometry are not supported. Projector buffers
+        must have the same device and dtype as sinogram, as for forward().
+
+        This reference implementation builds and differentiates a temporary
+        forward graph on each call, which can cost more memory and time than
+        backproject(). It also works under no_grad() and inference_mode().
+
+        Args:
+            sinogram: Sinogram of shape [B, 1, n_angles, n_det]
+
+        Returns:
+            Adjoint image of shape [B, 1, img_size, img_size]
+        """
+        return _DiscreteAdjoint.apply(sinogram, self)
+
+    def backward(self, sinogram: torch.Tensor) -> torch.Tensor:
+        """Exact discrete adjoint of forward(); alias for adjoint().
+
+        Differentiable with respect to sinogram: the reverse-mode gradient is
+        forward(grad_image). For the historical FBP backprojection, which has
+        different interpolation and normalization, use backproject().
+        """
+        return self.adjoint(sinogram)
+
+    @abstractmethod
+    def backproject(self, sinogram: torch.Tensor) -> torch.Tensor:
+        """
+        Analytical backprojection used by fbp(): sinogram -> image.
+
+        Includes reconstruction normalization and is not the exact discrete
+        adjoint of forward(). Use adjoint() for iterative/learned algorithms
+        requiring a matched operator pair, or fbp() for reconstruction.
 
         Args:
             sinogram: Sinogram of shape [B, 1, n_angles, n_det]

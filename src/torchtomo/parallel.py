@@ -4,8 +4,8 @@ from typing import Optional
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 
+from ._sampling import sample_bilinear
 from .base import BaseProjector
 from .filters import FilterType, apply_filter
 
@@ -128,13 +128,7 @@ class ParallelBeam(BaseProjector):
             batch = x.unsqueeze(1).expand(-1, angle_count, -1, -1, -1)
             batch = batch.reshape(B * angle_count, 1, self.img_size, self.img_size)
 
-            rotated = F.grid_sample(
-                batch,
-                grid,
-                mode="bilinear",
-                padding_mode="zeros",
-                align_corners=True,
-            )
+            rotated = sample_bilinear(batch, grid)
 
             projection = rotated.sum(dim=2) * self.pixel_size
             projection = projection.reshape(B, angle_count, 1, self.img_size)
@@ -145,11 +139,13 @@ class ParallelBeam(BaseProjector):
 
         return sinogram
 
-    def backward(self, sinogram: torch.Tensor) -> torch.Tensor:
+    def backproject(self, sinogram: torch.Tensor) -> torch.Tensor:
         """
-        Back projection (adjoint of Radon transform): sinogram -> image.
+        Analytical backprojection for FBP: sinogram -> image.
 
-        This smears each projection back across the image.
+        Smears projections across the image and applies angular normalization.
+        This is not the transpose of forward()'s discrete interpolation.
+        Use backward() or adjoint() for a matched discrete operator pair.
 
         Args:
             sinogram: Sinogram [B, 1, n_angles, n_det]
@@ -171,13 +167,7 @@ class ParallelBeam(BaseProjector):
             grid = grid.unsqueeze(0).expand(B, -1, -1, -1, -1)
             grid = grid.reshape(B * angle_count, self.img_size, self.img_size, 2)
 
-            contribution = F.grid_sample(
-                sino_rows,
-                grid,
-                mode="bilinear",
-                padding_mode="zeros",
-                align_corners=True,
-            )
+            contribution = sample_bilinear(sino_rows, grid)
             contribution = contribution.reshape(B, angle_count, 1, self.img_size, self.img_size)
             recon += contribution.sum(dim=1)
 
@@ -211,6 +201,6 @@ class ParallelBeam(BaseProjector):
         filtered_sino = filtered_sino * (self.img_size / 2)
 
         # Back-project
-        recon = self.backward(filtered_sino)
+        recon = self.backproject(filtered_sino)
 
         return recon

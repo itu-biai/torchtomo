@@ -4,8 +4,8 @@ from typing import Optional
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 
+from ._sampling import sample_bilinear
 from .base import BaseProjector
 from .filters import FilterType, apply_filter
 
@@ -282,13 +282,7 @@ class FanBeam(BaseProjector):
             batch = x.unsqueeze(1).expand(-1, angle_count, -1, -1, -1)
             batch = batch.reshape(B * angle_count, 1, self.img_size, self.img_size)
 
-            samples = F.grid_sample(
-                batch,
-                grid,
-                mode="bilinear",
-                padding_mode="zeros",
-                align_corners=True,
-            )
+            samples = sample_bilinear(batch, grid)
 
             projection = samples.mean(dim=-1).reshape(B, angle_count, 1, self.n_det)
             ray_len = self.ray_lengths[start:end].view(1, angle_count, 1, self.n_det)
@@ -299,9 +293,13 @@ class FanBeam(BaseProjector):
 
         return sinogram
 
-    def backward(self, sinogram: torch.Tensor) -> torch.Tensor:
+    def backproject(self, sinogram: torch.Tensor) -> torch.Tensor:
         """
-        Back projection (adjoint): sinogram -> image.
+        Weighted analytical backprojection for FBP: sinogram -> image.
+
+        Includes distance weights and angular normalization for reconstruction.
+        This is not the exact discrete adjoint of forward(); use backward()
+        or adjoint() when a matched discrete operator pair is required.
 
         Args:
             sinogram: Sinogram [B, 1, n_angles, n_det]
@@ -323,13 +321,7 @@ class FanBeam(BaseProjector):
             grid = grid.unsqueeze(0).expand(B, -1, -1, -1, -1)
             grid = grid.reshape(B * angle_count, self.img_size, self.img_size, 2)
 
-            contribution = F.grid_sample(
-                sino_rows,
-                grid,
-                mode="bilinear",
-                padding_mode="zeros",
-                align_corners=True,
-            )
+            contribution = sample_bilinear(sino_rows, grid)
             contribution = contribution.reshape(B, angle_count, 1, self.img_size, self.img_size)
             weight = self.backward_weights[start:end].view(1, angle_count, 1, self.img_size, self.img_size)
             recon += (contribution * weight).sum(dim=1)
@@ -360,7 +352,7 @@ class FanBeam(BaseProjector):
 
         filtered_sino = filtered_sino * (self.img_size / 2)
 
-        recon = self.backward(filtered_sino)
+        recon = self.backproject(filtered_sino)
 
         return recon
 
