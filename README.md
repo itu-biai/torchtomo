@@ -143,6 +143,18 @@ PYTHONPATH=src python benchmark/benchmark_adjoint.py --pairs 500 --dtype float64
 - Image: `[B, 1, H, W]`
 - Sinogram: `[B, 1, n_angles, n_det]`
 
+## Training Example
+
+The [ellipse reconstruction example](examples/ellipses/README.md) generates 100
+phantoms with a 60/20/20 train/validation/test split, calibrates transmission
+Poisson noise to approximately 23 dB FBP PSNR, and trains FBP+U-Net and Learned
+Primal-Dual models. It saves Python training logs, curves, checkpoints, and PNG
+comparisons using the existing development dependencies.
+
+```bash
+PYTHONPATH=src .venv/bin/python examples/ellipses/train.py
+```
+
 ## Development
 
 ```bash

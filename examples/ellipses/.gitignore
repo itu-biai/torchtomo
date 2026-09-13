@@ -1,0 +1,3 @@
+results/*.pt
+results/.matplotlib/
+!results/*.png

@@ -1,0 +1,14 @@
+{
+  "fbp-unet": {
+    "parameters": 118305,
+    "best_epoch": 26,
+    "epochs": 120,
+    "training_seconds": 53.943784209001024
+  },
+  "lpd": {
+    "parameters": 77690,
+    "best_epoch": 120,
+    "epochs": 120,
+    "training_seconds": 419.938332624999
+  }
+}
