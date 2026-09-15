@@ -423,16 +423,16 @@ photons per ray**. The fresh noisy dataset gave 22.969 dB training FBP and
 | FBP | nothing | 22.95 ± 0.38 dB | 0.0050853 | n/a |
 | SIRT | nothing | 28.19 ± 1.13 dB | 0.0015740 | 28 iterations |
 | SART | nothing | 28.24 ± 1.16 dB | 0.0015609 | 269 updates, relaxation 0.1 |
-| FBP + BM3D | nothing | 28.73 ± 1.35 dB | 0.0014112 | sigma 0.1 |
+| FBP + BM3D | nothing | 29.54 ± 1.39 dB | 0.0011771 | sigma 0.1 |
 | Noise2Inverse | measurements only | 29.69 ± 1.49 dB | 0.0011476 | epoch 27 |
 | Proj2Proj | measurements only | 27.16 ± 0.81 dB | 0.0019596 | epoch 112 |
-| iRadonMAP | clean images | 28.45 ± 1.36 dB | 0.0015096 | epoch 24 |
+| iRadonMAP | clean images | 29.69 ± 1.38 dB | 0.0011365 | epoch 118 |
 | FBP + U-Net | clean images | 31.48 ± 1.33 dB | 0.0007504 | epoch 26 |
 | RED (U-Net prior) | borrows the U-Net | 31.44 ± 1.29 dB | 0.0007552 | 1 iteration, weight 10 |
 | Learned Primal-Dual | clean images | 31.36 ± 1.50 dB | 0.0007808 | epoch 120 |
 
 FBP from noiseless data reaches 33.61 dB on this split, recorded as
-`noiseless_fbp_reference`. Training times: 56 s for the U-Net, 77 s for iRadonMAP,
+`noiseless_fbp_reference`. Training times: 56 s for the U-Net, 125 s for iRadonMAP,
 87 s for Noise2Inverse, 118 s for Proj2Proj, and 444 s for LPD, on four CPU threads.
 
 Both networks improved by more than 8 dB over FBP on this split. Their test means
@@ -461,13 +461,21 @@ parameter two-level network as everything else, on the shared schedule. It selec
 epoch 112 of 120, still improving when the schedule ends, so the 27.16 dB is a floor
 set by the training budget and not a property of the method.
 
-**iRadonMAP shows how much harder learning the inversion is than post-processing one.**
-It finishes 3.03 dB below FBP+U-Net despite carrying four times the parameters, and
-selects epoch 24 of 120, so it starts overfitting early. The paper pretrains on 62,899
-ImageNet images before touching clinical data; here it gets 60 training phantoms. Its
-filtering and back-projection layers begin at the analytic reconstruction, so the
-network starts at FBP and has to earn everything after that from the training split
-alone.
+**iRadonMAP needs its own learning rate, and this is worth knowing before reusing
+the architecture.** On the shared 1e-3 schedule it reached only 27.23 dB and its
+validation error sat at 253 times its training error, which is memorisation of the 60
+training phantoms. The cause is the geometry: its back-projection weights start at
+`angle_step`, about 0.035 here, so a single Adam step of 1e-3 moves each one by a few
+percent of its own value and pulls apart the analytic reconstruction the layer was
+initialised to. Dropping to 1e-4 is worth **1.25 dB** and collapses the ratio from 253
+to 2.8. The paper's own 2e-5, on the other hand, leaves it under-trained at 24.07 dB.
+`--iradon-learning-rate` therefore defaults to 1e-4 rather than following the shared
+schedule.
+
+Even so it finishes 1.79 dB below FBP+U-Net, and at 1e-4 it selects epoch 118 of 120,
+so it is still improving when the schedule ends. Learning the inversion is simply a
+harder problem than post-processing one: the paper pretrains on 62,899 ImageNet images
+before touching clinical data, where this gets 60 phantoms.
 
 RED does not improve on the U-Net it borrows. The validation search runs to the
 prior-dominated end of the sweep, weight 10 and a single iteration, which is very nearly

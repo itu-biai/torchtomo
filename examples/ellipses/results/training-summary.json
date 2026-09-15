@@ -13,9 +13,10 @@
   },
   "iradonmap": {
     "parameters": 491041,
-    "best_epoch": 24,
+    "best_epoch": 118,
     "epochs": 120,
-    "training_seconds": 77.17234333299893
+    "training_seconds": 124.82832712601521,
+    "learning_rate": 0.0001
   },
   "noise2inverse": {
     "parameters": 118305,

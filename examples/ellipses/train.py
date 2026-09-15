@@ -203,20 +203,21 @@ def summarize(prediction, truth, region=None, windows=None):
     return result
 
 
-def train_model(name, model, objective, data, args, output, epochs, seed):
+def train_model(name, model, objective, data, args, output, epochs, seed, learning_rate):
     device = torch.device(args.device)
     model.to(device)
     train_ids, val_ids = data["splits"]["train"], data["splits"]["val"]
     truth = data["truth"]
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=args.learning_rate * 0.01)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=learning_rate * 0.01)
     generator = torch.Generator().manual_seed(seed)
     parameter_count = sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
     LOGGER.info(
-        "model=%s parameters=%d epochs=%d device=%s supervised=%s selected_on=%s",
+        "model=%s parameters=%d epochs=%d lr=%.3g device=%s supervised=%s selected_on=%s",
         name,
         parameter_count,
         epochs,
+        learning_rate,
         device,
         objective.uses_truth,
         objective.criterion,
@@ -531,6 +532,12 @@ def main():
     parser.add_argument("--unet-width", type=int, default=16, help="Channels at the U-Net's finest level")
     parser.add_argument("--iradon-width", type=int, default=16, help="Channels in the iRadonMAP refinement network")
     parser.add_argument(
+        "--iradon-learning-rate",
+        type=float,
+        default=1e-4,
+        help="iRadonMAP needs a smaller step than the other networks; 1e-3 tears its geometric layers apart",
+    )
+    parser.add_argument(
         "--n2i-splits", type=int, default=3, help="View subsets for Noise2Inverse; must divide --angles"
     )
     parser.add_argument("--p2p-grid", type=int, default=4, help="Proj2Proj mask grid side in the projection domain")
@@ -584,6 +591,7 @@ def main():
             "lpd_width",
             "unet_width",
             "iradon_width",
+            "iradon_learning_rate",
             "n2i_splits",
             "p2p_grid",
             "models",
@@ -654,12 +662,18 @@ def main():
     projector.to(args.device)
 
     def build(name):
-        """Each method as (model, objective, epochs), with its own seed."""
+        """Each method as (model, objective, epochs, learning rate), with its own seed.
+
+        iRadonMAP needs a smaller step than the rest. Its filtering and back-projection
+        layers start at the analytic reconstruction, and an Adam step of 1e-3 moves each
+        back-projection weight by a few percent of its initial value, which pulls the
+        geometry apart faster than the refinement network can make use of it.
+        """
         offsets = {"fbp-unet": 4, "lpd": 5, "iradonmap": 7, "noise2inverse": 8, "proj2proj": 9}
         torch.manual_seed(args.seed + offsets[name])
         unet_of = lambda: FBPUNet(projector.circle_mask, width=config["unet_width"])  # noqa: E731
         if name == "fbp-unet":
-            return unet_of(), Supervised(data["fbp"], data["truth"]), args.unet_epochs
+            return unet_of(), Supervised(data["fbp"], data["truth"]), args.unet_epochs, args.learning_rate
         if name == "lpd":
             model = LearnedPrimalDual(
                 projector,
@@ -668,35 +682,37 @@ def main():
                 memory=config["lpd_memory"],
                 width=config["lpd_width"],
             )
-            return model, Supervised(data["noisy"], data["truth"]), args.lpd_epochs
+            return model, Supervised(data["noisy"], data["truth"]), args.lpd_epochs, args.learning_rate
         if name == "iradonmap":
             model = IRadonMap(projector, width=config["iradon_width"])
-            return model, Supervised(data["noisy"], data["truth"]), args.unet_epochs
+            return model, Supervised(data["noisy"], data["truth"]), args.unet_epochs, args.iradon_learning_rate
         if name == "noise2inverse":
             objective = Noise2Inverse(projector, data["noisy"], config["n2i_splits"])
-            return unet_of(), objective, args.unet_epochs
+            return unet_of(), objective, args.unet_epochs, args.learning_rate
         if name == "proj2proj":
             objective = Proj2Proj(projector, data["noisy"], config["p2p_grid"])
-            return unet_of(), objective, args.unet_epochs
+            return unet_of(), objective, args.unet_epochs, args.learning_rate
         raise ValueError(f"unknown model {name}")
 
     selected = [name for name in config["models"].split(",") if name]
     model_specs = [(name, *build(name)) for name in selected]
-    for name, model, objective, epochs in model_specs:
+    for name, model, objective, epochs, learning_rate in model_specs:
         if evaluate_only:
             load_weights(model, torch.load(output / f"{name}-best.pt", map_location="cpu")["state_dict"])
             model.to(args.device)
         else:
-            training[name] = train_model(name, model, objective, data, args, output, epochs, args.seed + 6)
+            training[name] = train_model(
+                name, model, objective, data, args, output, epochs, args.seed + 6, learning_rate
+            )
             write_json(output / "training-summary.json", training)
 
     test_ids = data["splits"]["test"]
     region = projector.circle_mask.bool()
     scored = {"fbp": data["fbp"][test_ids]}
-    for name, model, objective, _ in model_specs:
+    for name, model, objective, _, _ in model_specs:
         scored[name] = objective.reconstruct(model, test_ids, args.device, args.batch_size)
     if not args.skip_classical:
-        denoiser = dict((name, model) for name, model, _, _ in model_specs).get("fbp-unet")
+        denoiser = dict((name, model) for name, model, *_ in model_specs).get("fbp-unet")
         untrained, selection = run_classical(projector, data, denoiser, operator_norm, args, region)
         write_json(output / "classical-selection.json", selection)
         scored.update(untrained)
@@ -745,7 +761,7 @@ def main():
         {"split": "test", "ids": test_ids.tolist(), "methods": metrics, "noiseless_fbp_reference": reference},
     )
     torch.save({"ids": test_ids, "truth": data["truth"][test_ids], **reconstructions}, output / "reconstructions.pt")
-    supervision = {name: objective.uses_truth for name, _, objective, _ in model_specs}
+    supervision = {name: objective.uses_truth for name, _, objective, *_ in model_specs}
     save_plots(output, data, reconstructions, metrics, supervision, tile=args.grid_tile)
     LOGGER.info("complete outputs=%s", output)
 

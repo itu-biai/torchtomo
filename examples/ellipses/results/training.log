@@ -1064,3 +1064,37 @@
 2026-09-15 17:35:37,531 INFO TEST method=lpd mean_psnr_db=31.3648 roi_psnr_db=30.1492 window_psnr_db=n/a std_psnr_db=1.4996 mse=0.0007808
 2026-09-15 17:35:37,544 INFO TEST reference=noiseless-fbp mean_psnr_db=33.6088 roi_psnr_db=32.3932 window_psnr_db=n/a
 2026-09-15 17:35:40,073 INFO complete outputs=/Users/mehmetozanunal/projects/itu-biai/torchtomo/examples/ellipses/results
+2026-09-15 22:55:01,145 WARNING config.json has no iradon_learning_rate; using 0.0001
+2026-09-15 22:55:01,147 INFO run device=cpu torch=2.10.0 image_size=64 angles=90 seed=2026
+2026-09-15 22:55:02,833 INFO classical sart_subsets=90 sirt_iterations=200 sart_sweeps=20 red_iterations=100
+2026-09-15 22:55:19,155 INFO classical method=sirt setting=default best_val_iterations=28 val_psnr_db=26.7009
+2026-09-15 22:55:21,493 INFO classical method=sirt selected iterations=28 setting=default val_psnr_db=26.7009
+2026-09-15 22:55:24,864 INFO classical method=bm3d setting=0.01 best_val_stages=1 val_psnr_db=23.2422
+2026-09-15 22:55:28,230 INFO classical method=bm3d setting=0.02 best_val_stages=1 val_psnr_db=23.5349
+2026-09-15 22:55:31,600 INFO classical method=bm3d setting=0.05 best_val_stages=1 val_psnr_db=25.9257
+2026-09-15 22:55:34,966 INFO classical method=bm3d setting=0.1 best_val_stages=1 val_psnr_db=27.8740
+2026-09-15 22:55:38,348 INFO classical method=bm3d setting=0.2 best_val_stages=1 val_psnr_db=26.5418
+2026-09-15 22:55:41,697 INFO classical method=bm3d selected stages=1 setting=0.1 val_psnr_db=27.8740
+2026-09-15 22:55:47,112 INFO classical method=sart setting=1 best_val_subset updates=26 val_psnr_db=23.2296
+2026-09-15 22:55:52,379 INFO classical method=sart setting=0.3 best_val_subset updates=90 val_psnr_db=26.4857
+2026-09-15 22:55:57,835 INFO classical method=sart setting=0.1 best_val_subset updates=269 val_psnr_db=26.7432
+2026-09-15 22:56:03,077 INFO classical method=sart setting=0.03 best_val_subset updates=970 val_psnr_db=26.7161
+2026-09-15 22:56:03,715 INFO classical method=sart selected subset updates=269 setting=0.1 val_psnr_db=26.7432
+2026-09-15 22:56:17,632 INFO classical method=red setting=0.1 best_val_iterations=23 val_psnr_db=28.9917
+2026-09-15 22:56:31,643 INFO classical method=red setting=0.3 best_val_iterations=7 val_psnr_db=29.0682
+2026-09-15 22:56:45,512 INFO classical method=red setting=1 best_val_iterations=3 val_psnr_db=28.6956
+2026-09-15 22:56:59,323 INFO classical method=red setting=3 best_val_iterations=1 val_psnr_db=28.9805
+2026-09-15 22:57:13,555 INFO classical method=red setting=10 best_val_iterations=1 val_psnr_db=29.8510
+2026-09-15 22:57:13,693 INFO classical method=red selected iterations=1 setting=10 val_psnr_db=29.8510
+2026-09-15 22:57:13,731 INFO TEST method=fbp mean_psnr_db=22.9537 roi_psnr_db=21.7381 window_psnr_db=n/a std_psnr_db=0.3796 mse=0.0050853
+2026-09-15 22:57:13,731 INFO TEST method=sirt mean_psnr_db=28.1933 roi_psnr_db=26.9777 window_psnr_db=n/a std_psnr_db=1.1280 mse=0.0015740
+2026-09-15 22:57:13,732 INFO TEST method=sart mean_psnr_db=28.2404 roi_psnr_db=27.0248 window_psnr_db=n/a std_psnr_db=1.1635 mse=0.0015609
+2026-09-15 22:57:13,733 INFO TEST method=bm3d mean_psnr_db=29.5365 roi_psnr_db=28.3209 window_psnr_db=n/a std_psnr_db=1.3877 mse=0.0011771
+2026-09-15 22:57:13,733 INFO TEST method=fbp-unet mean_psnr_db=31.4796 roi_psnr_db=30.2640 window_psnr_db=n/a std_psnr_db=1.3277 mse=0.0007504
+2026-09-15 22:57:13,734 INFO TEST method=red mean_psnr_db=31.4359 roi_psnr_db=30.2203 window_psnr_db=n/a std_psnr_db=1.2871 mse=0.0007552
+2026-09-15 22:57:13,734 INFO TEST method=iradonmap mean_psnr_db=29.6881 roi_psnr_db=28.4725 window_psnr_db=n/a std_psnr_db=1.3756 mse=0.0011365
+2026-09-15 22:57:13,735 INFO TEST method=noise2inverse mean_psnr_db=29.6910 roi_psnr_db=28.4754 window_psnr_db=n/a std_psnr_db=1.4882 mse=0.0011476
+2026-09-15 22:57:13,735 INFO TEST method=proj2proj mean_psnr_db=27.1595 roi_psnr_db=25.9439 window_psnr_db=n/a std_psnr_db=0.8070 mse=0.0019596
+2026-09-15 22:57:13,736 INFO TEST method=lpd mean_psnr_db=31.3648 roi_psnr_db=30.1492 window_psnr_db=n/a std_psnr_db=1.4996 mse=0.0007808
+2026-09-15 22:57:13,754 INFO TEST reference=noiseless-fbp mean_psnr_db=33.6088 roi_psnr_db=32.3932 window_psnr_db=n/a
+2026-09-15 22:57:16,658 INFO complete outputs=/Users/mehmetozanunal/projects/itu-biai/torchtomo/examples/ellipses/results
