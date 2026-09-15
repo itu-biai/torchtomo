@@ -3,12 +3,30 @@
     "parameters": 118305,
     "best_epoch": 26,
     "epochs": 120,
-    "training_seconds": 53.943784209001024
+    "training_seconds": 55.60312512499877
   },
   "lpd": {
     "parameters": 77690,
     "best_epoch": 120,
     "epochs": 120,
-    "training_seconds": 419.938332624999
+    "training_seconds": 443.877015125001
+  },
+  "iradonmap": {
+    "parameters": 491041,
+    "best_epoch": 24,
+    "epochs": 120,
+    "training_seconds": 77.17234333299893
+  },
+  "noise2inverse": {
+    "parameters": 118305,
+    "best_epoch": 27,
+    "epochs": 120,
+    "training_seconds": 87.19356220900045
+  },
+  "proj2proj": {
+    "parameters": 118305,
+    "best_epoch": 112,
+    "epochs": 120,
+    "training_seconds": 118.42175162499916
   }
 }

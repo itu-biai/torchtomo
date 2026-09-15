@@ -4,6 +4,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from torchtomo._sampling import sample_bilinear
+
 
 def conv_block(in_channels, out_channels):
     return nn.Sequential(
@@ -93,3 +95,61 @@ def estimate_operator_norm(projector, iterations=25):
         x = projector.backward(projector(x))
         x /= x.norm().clamp_min(1e-12)
     return projector(x).norm().item()
+
+
+@torch.no_grad()
+def ramp_filter_matrix(projector, filter_name="ramp"):
+    """The dense matrix form of the filtering fbp() applies along the detector axis.
+
+    Feeding the identity through apply_filter recovers the operator exactly,
+    including its padding, so a learnable layer can start from the analytic filter.
+    """
+    from torchtomo import apply_filter
+
+    identity = torch.eye(projector.n_det).view(projector.n_det, 1, 1, projector.n_det)
+    columns = apply_filter(identity, filter_name).view(projector.n_det, projector.n_det)
+    return columns.t().contiguous() * (projector.img_size / 2)
+
+
+class IRadonMap(nn.Module):
+    """iRadonMAP: learnable filtering and back-projection, then a refinement network.
+
+    Follows He et al., Radon Inversion via Deep Learning (IEEE TMI 2020). The
+    fully connected filtering layer maps each view's detector vector through a
+    shared dense matrix, replacing the ramp filter. The sinusoidal
+    back-projection layer keeps the geometry's sinusoid for every pixel but
+    gives each pixel and view its own weight, which is far cheaper than a dense
+    layer and is what makes the architecture usable at 512 x 512.
+
+    Both layers start at the analytic reconstruction, so the untrained network
+    reproduces fbp() and training begins from there.
+    """
+
+    def __init__(self, projector, width=16, filter_name="ramp"):
+        super().__init__()
+        self.projector = projector
+        self.filtering = nn.Parameter(ramp_filter_matrix(projector, filter_name))
+        weights = torch.full((projector.n_angles, projector.img_size, projector.img_size), float(projector.angle_step))
+        self.backprojection = nn.Parameter(weights)
+        self.refine = FBPUNet(projector.circle_mask, width=width)
+
+    def sinusoidal_backprojection(self, filtered):
+        """Sum each pixel's own weighting of the views along its sinusoid."""
+        projector = self.projector
+        batch = filtered.shape[0]
+        size = projector.img_size
+        image = filtered.new_zeros(batch, 1, size, size)
+        chunk = projector._angle_chunk_size(batch, size * size, filtered.device)
+        for start in range(0, projector.n_angles, chunk):
+            end = min(start + chunk, projector.n_angles)
+            count = end - start
+            rows = filtered[:, :, start:end, :].permute(0, 2, 1, 3).reshape(batch * count, 1, 1, projector.n_det)
+            grid = projector.backward_grids[start:end]
+            grid = grid.unsqueeze(0).expand(batch, -1, -1, -1, -1).reshape(batch * count, size, size, 2)
+            sampled = sample_bilinear(rows, grid).reshape(batch, count, size, size)
+            image = image + (sampled * self.backprojection[start:end]).sum(dim=1, keepdim=True)
+        return image * projector.circle_mask[None, None]
+
+    def forward(self, sinogram):
+        filtered = sinogram @ self.filtering.t()
+        return self.refine(self.sinusoidal_backprojection(filtered))

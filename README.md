@@ -129,9 +129,9 @@ PYTHONPATH=src python benchmark/benchmark_adjoint.py --pairs 500 --dtype float64
 - `ParallelBeam(...)`
 - `FanBeam(...)`
 - `projector.forward(image)`
-- `projector.backward(sinogram)` — exact discrete adjoint, for LPD/iterative methods
-- `projector.adjoint(sinogram)` — equivalent to `backward(sinogram)`
-- `projector.backproject(sinogram)` — analytical backprojection, used by FBP
+- `projector.backward(sinogram)`: exact discrete adjoint, for LPD/iterative methods
+- `projector.adjoint(sinogram)`: equivalent to `backward(sinogram)`
+- `projector.backproject(sinogram)`: analytical backprojection, used by FBP
 - `projector.fbp(sinogram, filter_name="ramp")`
 - `apply_filter(sinogram, filter_name=...)`
 - `shepp_logan(size=..., device=...)`
@@ -146,10 +146,13 @@ PYTHONPATH=src python benchmark/benchmark_adjoint.py --pairs 500 --dtype float64
 ## Training Example
 
 The [ellipse reconstruction example](examples/ellipses/README.md) generates 100
-phantoms with a 60/20/20 train/validation/test split, calibrates transmission
-Poisson noise to approximately 23 dB FBP PSNR, and trains FBP+U-Net and Learned
-Primal-Dual models. It saves Python training logs, curves, checkpoints, and PNG
-comparisons using the existing development dependencies.
+phantoms with a 60/20/20 train/validation/test split, or loads real CT slices,
+calibrates transmission Poisson noise to approximately 23 dB FBP PSNR, and trains
+FBP+U-Net, iRadonMAP, and Learned Primal-Dual models, plus Noise2Inverse and
+Proj2Proj, which train without any clean image. It scores them against FBP, SIRT,
+SART, BM3D, and RED, the last of which reuses the trained U-Net as its denoiser. It saves Python
+training logs, curves, checkpoints, and PNG comparisons using the existing
+development dependencies.
 
 ```bash
 PYTHONPATH=src .venv/bin/python examples/ellipses/train.py

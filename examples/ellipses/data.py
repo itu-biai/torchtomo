@@ -1,8 +1,10 @@
-"""Seeded ellipse phantoms, transmission Poisson noise, and FBP calibration."""
+"""Ellipse phantoms, real CT slices, transmission Poisson noise, and FBP calibration."""
 
 import logging
 import math
+from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -67,10 +69,57 @@ def poisson_sinogram(clean, photons, seed):
     return noisy, counts
 
 
-def psnr_per_image(prediction, target):
-    """Full-image PSNR, fixed data range 1, with no prediction clipping."""
-    mse = (prediction - target).square().flatten(1).mean(1)
+def psnr_per_image(prediction, target, region=None):
+    """PSNR per image, fixed data range 1, with no prediction clipping.
+
+    Without a region this averages over the whole square, which includes the
+    corners every method sets to zero. Pass a boolean [H, W] region to score
+    only the part of the image the geometry can actually see.
+    """
+    error = (prediction - target).square()
+    if region is None:
+        mse = error.flatten(1).mean(1)
+    else:
+        # The projector may live on an accelerator while predictions are gathered on CPU.
+        mse = error[:, 0][:, region.to(error.device)].mean(1)
     return -10 * torch.log10(mse.clamp_min(1e-12))
+
+
+def load_ct_splits(data_dir, image_size):
+    """Read packed CT slices written by pack_ct_subset.py.
+
+    Returns the stacked ground truth, index tensors for each split, and the
+    source file names. The packed splits are patient-disjoint by construction.
+    """
+    images, names, windows, splits, start = [], [], [], {}, 0
+    for split in ("train", "val", "test"):
+        path = Path(data_dir) / f"{split}.npz"
+        if not path.exists():
+            raise FileNotFoundError(f"Missing {path}; run pack_ct_subset.py first")
+        with np.load(path, allow_pickle=False) as archive:
+            batch = torch.from_numpy(archive["images"].astype(np.float32)).unsqueeze(1)
+            names.extend(str(name) for name in archive["names"])
+            if "windows" in archive:
+                windows.append(torch.from_numpy(archive["windows"].astype(np.float32)))
+        if batch.shape[-1] != image_size:
+            batch = F.interpolate(batch, size=(image_size, image_size), mode="area")
+        images.append(batch)
+        splits[split] = torch.arange(start, start + len(batch))
+        start += len(batch)
+    stacked = torch.cat(windows) if len(windows) == 3 else None
+    return torch.cat(images), splits, names, stacked
+
+
+def apply_window(images, windows):
+    """Map attenuation into each slice's own display window, clipped to [0, 1].
+
+    This reproduces the clipped image the dataset ships, so metrics and figures
+    read at the contrast the window was chosen for instead of across the whole
+    attenuation range, where soft tissue occupies a small part of the scale.
+    """
+    low = windows[:, 0].view(-1, 1, 1, 1)
+    high = windows[:, 1].view(-1, 1, 1, 1)
+    return ((images - low) / (high - low)).clamp(0, 1)
 
 
 @torch.no_grad()
@@ -78,23 +127,33 @@ def apply_in_batches(operation, tensor, batch_size=5):
     return torch.cat([operation(batch) for batch in tensor.split(batch_size)])
 
 
-def calibrate_photons(projector, clean_train, truth_train, target=23.0, seed=2028):
-    """Choose I0 on training images only; never inspect validation/test targets."""
+def calibrate_photons(projector, clean_train, truth_train, target=23.0, seed=2028, windows=None):
+    """Choose I0 on training images only; never inspect validation/test targets.
+
+    With a display window the target is scored inside it, because that is the
+    contrast the reconstruction is read at. A dose that looks acceptable across the
+    full attenuation range can be pure noise once a narrow window is applied.
+    """
     trials = []
 
     def evaluate(photons):
         noisy, _ = poisson_sinogram(clean_train, photons, seed)
         reconstruction = apply_in_batches(projector.fbp, noisy)
-        score = psnr_per_image(reconstruction, truth_train).mean().item()
+        if windows is None:
+            score = psnr_per_image(reconstruction, truth_train).mean().item()
+        else:
+            score = (
+                psnr_per_image(apply_window(reconstruction, windows), apply_window(truth_train, windows)).mean().item()
+            )
         trials.append({"photons": photons, "train_fbp_psnr_db": score})
         LOGGER.info("calibration photons=%.3f train_fbp_psnr_db=%.4f", photons, score)
         return score
 
-    low, high = 10.0, 1e6
+    low, high = 10.0, 1e8
     low_score, high_score = evaluate(low), evaluate(high)
     if not low_score <= target <= high_score:
         raise ValueError(f"Target {target:.2f} dB is not bracketed by {low_score:.2f} and {high_score:.2f} dB")
-    for _ in range(12):
+    for _ in range(16):
         midpoint = math.sqrt(low * high)
         score = evaluate(midpoint)
         if abs(score - target) < 0.05:

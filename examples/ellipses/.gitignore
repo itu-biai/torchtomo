@@ -1,3 +1,6 @@
-results/*.pt
-results/.matplotlib/
-!results/*.png
+results*/*.pt
+results*/*.tmp
+results*/.matplotlib/
+!results*/*.png
+results*/*.pid
+results*/console.log
