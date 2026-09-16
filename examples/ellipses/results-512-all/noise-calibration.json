@@ -1,0 +1,54 @@
+{
+  "split": "train",
+  "trials": [
+    {
+      "photons": 10.0,
+      "train_fbp_psnr_db": -15.715069770812988
+    },
+    {
+      "photons": 100000000.0,
+      "train_fbp_psnr_db": 32.180335998535156
+    },
+    {
+      "photons": 31622.776601683792,
+      "train_fbp_psnr_db": 20.07107925415039
+    },
+    {
+      "photons": 1778279.410038923,
+      "train_fbp_psnr_db": 31.11931610107422
+    },
+    {
+      "photons": 237137.37056616554,
+      "train_fbp_psnr_db": 27.324460983276367
+    },
+    {
+      "photons": 86596.43233600653,
+      "train_fbp_psnr_db": 23.99431800842285
+    },
+    {
+      "photons": 52329.91146814947,
+      "train_fbp_psnr_db": 22.084970474243164
+    },
+    {
+      "photons": 67317.03824144982,
+      "train_fbp_psnr_db": 23.05103874206543
+    },
+    {
+      "photons": 59352.29272296986,
+      "train_fbp_psnr_db": 22.57050132751465
+    },
+    {
+      "photons": 63209.3391750767,
+      "train_fbp_psnr_db": 22.8105411529541
+    },
+    {
+      "photons": 65230.86311298824,
+      "train_fbp_psnr_db": 22.932607650756836
+    },
+    {
+      "photons": 66265.7415766232,
+      "train_fbp_psnr_db": 22.989397048950195
+    }
+  ],
+  "selected_photons": 66265.7415766232
+}

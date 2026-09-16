@@ -38,6 +38,7 @@ benchmark = [
     "pytest",
     "scikit-image",
     "torch-radon",
+    # leapct is built from source, not installed from an index; see benchmark/README.md
 ]
 dev = [
     "build",

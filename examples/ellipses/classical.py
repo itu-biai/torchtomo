@@ -17,8 +17,6 @@ import torch
 from bm3d import denoise as bm3d_denoise
 from data import apply_window, psnr_per_image
 
-from torchtomo import ParallelBeam
-
 LOGGER = logging.getLogger("ellipses")
 
 
@@ -65,7 +63,8 @@ def subset_projectors(projector, count):
     for offset in range(count):
         indices = torch.arange(offset, projector.n_angles, count)
         chosen = projector.angles[indices]
-        subset = ParallelBeam(
+        # type(projector), not ParallelBeam, so a run on another backend keeps it.
+        subset = type(projector)(
             img_size=projector.img_size,
             n_angles=len(chosen),
             n_det=projector.n_det,

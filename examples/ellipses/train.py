@@ -107,8 +107,21 @@ def build_truth(args, projector, output):
     return truth, splits, source, windows
 
 
+def build_projector(args):
+    """The geometry, from whichever backend the run asked for.
+
+    LEAP is an optional benchmark dependency, so it is imported only when chosen;
+    an ordinary run never touches it.
+    """
+    if args.projector == "leap":
+        from leap_projector import LeapParallelBeam
+
+        return LeapParallelBeam(img_size=args.image_size, n_angles=args.angles)
+    return ParallelBeam(img_size=args.image_size, n_angles=args.angles)
+
+
 def prepare_data(args, output):
-    projector = ParallelBeam(img_size=args.image_size, n_angles=args.angles)
+    projector = build_projector(args)
     truth, splits, source, windows = build_truth(args, projector, output)
     sizes = {key: len(value) for key, value in splits.items()}
     clean = apply_in_batches(projector.forward, truth, args.batch_size)
@@ -248,10 +261,17 @@ def train_model(name, model, objective, data, args, output, epochs, seed, learni
             optimizer.zero_grad(set_to_none=True)
             # A global counter, so the methods that cycle a mask or a held-out
             # subset keep advancing across epochs and resume where they stopped.
-            loss = objective.loss(model, ids, device, (epoch - 1) * len(batches) + step)
-            if not torch.isfinite(loss):
-                raise RuntimeError(f"Non-finite {name} loss at epoch {epoch}")
-            loss.backward()
+            global_step = (epoch - 1) * len(batches) + step
+            batch_error = 0.0
+            # Every objective's loss is a mean over the images in the call, so
+            # weighting each piece by its share rebuilds the whole batch's gradient
+            # exactly. Only the activations held at once shrink.
+            for piece in ids.split(args.micro_batch or len(ids)):
+                loss = objective.loss(model, piece, device, global_step)
+                if not torch.isfinite(loss):
+                    raise RuntimeError(f"Non-finite {name} loss at epoch {epoch}")
+                (loss * (len(piece) / len(ids))).backward()
+                batch_error += loss.item() * len(piece)
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             if not torch.isfinite(grad_norm):
                 raise RuntimeError(f"Non-finite {name} gradient at epoch {epoch}")
@@ -268,7 +288,7 @@ def train_model(name, model, objective, data, args, output, epochs, seed, learni
                             raise RuntimeError(f"LPD gradient does not reach the first {branch} block")
                         LOGGER.info("model=lpd first_%s_gradient_norm=%.8g", branch, norm)
             optimizer.step()
-            squared_error += loss.item() * len(ids)
+            squared_error += batch_error
         # Selection uses the objective's own criterion. For the self-supervised
         # methods that is a loss built from the measurements, so no clean image is
         # consulted; the PSNR beside it is recorded for the curves only.
@@ -516,7 +536,20 @@ def main():
     )
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument(
+        "--micro-batch",
+        type=int,
+        default=0,
+        help="Accumulate each training batch in pieces of this many images; 0 keeps the batch whole. "
+        "The gradient is unchanged, so this only trades speed for peak memory on a smaller card",
+    )
     parser.add_argument("--device", choices=("cpu", "cuda", "mps"), default="cpu")
+    parser.add_argument(
+        "--projector",
+        choices=("torchtomo", "leap"),
+        default="torchtomo",
+        help="Which projector kernels to run on; leap needs benchmark/ on PYTHONPATH and LEAP installed",
+    )
     parser.add_argument(
         "--resume", action="store_true", help="Resume saved data, weights, optimizer, and epoch schedule"
     )
@@ -595,6 +628,7 @@ def main():
             "n2i_splits",
             "p2p_grid",
             "models",
+            "projector",
         ):
             if key in config:
                 setattr(args, key, config[key])
@@ -616,6 +650,8 @@ def main():
     )
     if min(sizes) < 1:
         parser.error("sizes, epochs, batch size, thread count, and model widths must be positive")
+    if args.micro_batch < 0:
+        parser.error("micro batch size cannot be negative")
     if args.lpd_memory < 2:
         parser.error("LPD needs at least two memory channels; the forward operator reads the second one")
     if args.image_size < 8 or args.image_size % 4:
@@ -632,7 +668,7 @@ def main():
     )
     if evaluate_only or args.resume:
         data = torch.load(output / "dataset.pt", map_location="cpu")
-        projector = ParallelBeam(img_size=args.image_size, n_angles=args.angles)
+        projector = build_projector(args)
         operator_norm = config["operator_norm"]
         summary_path = output / "training-summary.json"
         training = json.loads(summary_path.read_text()) if summary_path.exists() else {}

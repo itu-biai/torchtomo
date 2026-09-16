@@ -1,0 +1,2424 @@
+{
+  "leap-fbp": {
+    "curve": [
+      {
+        "iteration": 1,
+        "psnr_db": 13.458118743896485
+      }
+    ],
+    "selected_iteration": 1,
+    "val_psnr_db": 13.458118743896485
+  },
+  "leap-sirt": {
+    "curve": [
+      {
+        "iteration": 1,
+        "psnr_db": 10.747566757202149
+      },
+      {
+        "iteration": 2,
+        "psnr_db": 11.40756217956543
+      },
+      {
+        "iteration": 3,
+        "psnr_db": 12.428734664916993
+      },
+      {
+        "iteration": 4,
+        "psnr_db": 13.437406158447265
+      },
+      {
+        "iteration": 5,
+        "psnr_db": 14.265986328125
+      },
+      {
+        "iteration": 6,
+        "psnr_db": 14.90979751586914
+      },
+      {
+        "iteration": 7,
+        "psnr_db": 15.410951538085937
+      },
+      {
+        "iteration": 8,
+        "psnr_db": 15.810685272216796
+      },
+      {
+        "iteration": 9,
+        "psnr_db": 16.13949234008789
+      },
+      {
+        "iteration": 10,
+        "psnr_db": 16.418157043457033
+      },
+      {
+        "iteration": 11,
+        "psnr_db": 16.660712585449218
+      },
+      {
+        "iteration": 12,
+        "psnr_db": 16.87600036621094
+      },
+      {
+        "iteration": 13,
+        "psnr_db": 17.06972732543945
+      },
+      {
+        "iteration": 14,
+        "psnr_db": 17.245713195800782
+      },
+      {
+        "iteration": 15,
+        "psnr_db": 17.406405792236328
+      },
+      {
+        "iteration": 16,
+        "psnr_db": 17.55383544921875
+      },
+      {
+        "iteration": 17,
+        "psnr_db": 17.68970901489258
+      },
+      {
+        "iteration": 18,
+        "psnr_db": 17.81538330078125
+      },
+      {
+        "iteration": 19,
+        "psnr_db": 17.932054290771486
+      },
+      {
+        "iteration": 20,
+        "psnr_db": 18.04071792602539
+      },
+      {
+        "iteration": 21,
+        "psnr_db": 18.14209899902344
+      },
+      {
+        "iteration": 22,
+        "psnr_db": 18.236815795898437
+      },
+      {
+        "iteration": 23,
+        "psnr_db": 18.32541427612305
+      },
+      {
+        "iteration": 24,
+        "psnr_db": 18.40840545654297
+      },
+      {
+        "iteration": 25,
+        "psnr_db": 18.486228942871094
+      },
+      {
+        "iteration": 26,
+        "psnr_db": 18.559286041259767
+      },
+      {
+        "iteration": 27,
+        "psnr_db": 18.627991180419922
+      },
+      {
+        "iteration": 28,
+        "psnr_db": 18.692690277099608
+      },
+      {
+        "iteration": 29,
+        "psnr_db": 18.75372039794922
+      },
+      {
+        "iteration": 30,
+        "psnr_db": 18.81134292602539
+      },
+      {
+        "iteration": 31,
+        "psnr_db": 18.865811614990236
+      },
+      {
+        "iteration": 32,
+        "psnr_db": 18.91739501953125
+      },
+      {
+        "iteration": 33,
+        "psnr_db": 18.966340942382814
+      },
+      {
+        "iteration": 34,
+        "psnr_db": 19.01280731201172
+      },
+      {
+        "iteration": 35,
+        "psnr_db": 19.05692184448242
+      },
+      {
+        "iteration": 36,
+        "psnr_db": 19.098860626220702
+      },
+      {
+        "iteration": 37,
+        "psnr_db": 19.138777770996093
+      },
+      {
+        "iteration": 38,
+        "psnr_db": 19.176804962158204
+      },
+      {
+        "iteration": 39,
+        "psnr_db": 19.213108367919922
+      },
+      {
+        "iteration": 40,
+        "psnr_db": 19.247767944335937
+      },
+      {
+        "iteration": 41,
+        "psnr_db": 19.28093536376953
+      },
+      {
+        "iteration": 42,
+        "psnr_db": 19.312652435302734
+      },
+      {
+        "iteration": 43,
+        "psnr_db": 19.343024291992187
+      },
+      {
+        "iteration": 44,
+        "psnr_db": 19.37208984375
+      },
+      {
+        "iteration": 45,
+        "psnr_db": 19.399949035644532
+      },
+      {
+        "iteration": 46,
+        "psnr_db": 19.42665054321289
+      },
+      {
+        "iteration": 47,
+        "psnr_db": 19.452242279052733
+      },
+      {
+        "iteration": 48,
+        "psnr_db": 19.476768798828125
+      },
+      {
+        "iteration": 49,
+        "psnr_db": 19.500318908691405
+      },
+      {
+        "iteration": 50,
+        "psnr_db": 19.522925720214843
+      },
+      {
+        "iteration": 51,
+        "psnr_db": 19.54464111328125
+      },
+      {
+        "iteration": 52,
+        "psnr_db": 19.56552459716797
+      },
+      {
+        "iteration": 53,
+        "psnr_db": 19.5856037902832
+      },
+      {
+        "iteration": 54,
+        "psnr_db": 19.60492889404297
+      },
+      {
+        "iteration": 55,
+        "psnr_db": 19.62354705810547
+      },
+      {
+        "iteration": 56,
+        "psnr_db": 19.6414778137207
+      },
+      {
+        "iteration": 57,
+        "psnr_db": 19.65878189086914
+      },
+      {
+        "iteration": 58,
+        "psnr_db": 19.675484924316407
+      },
+      {
+        "iteration": 59,
+        "psnr_db": 19.691604766845703
+      },
+      {
+        "iteration": 60,
+        "psnr_db": 19.707172241210937
+      },
+      {
+        "iteration": 61,
+        "psnr_db": 19.7222004699707
+      },
+      {
+        "iteration": 62,
+        "psnr_db": 19.73668701171875
+      },
+      {
+        "iteration": 63,
+        "psnr_db": 19.750657653808595
+      },
+      {
+        "iteration": 64,
+        "psnr_db": 19.76413833618164
+      },
+      {
+        "iteration": 65,
+        "psnr_db": 19.77712341308594
+      },
+      {
+        "iteration": 66,
+        "psnr_db": 19.789635467529298
+      },
+      {
+        "iteration": 67,
+        "psnr_db": 19.8016716003418
+      },
+      {
+        "iteration": 68,
+        "psnr_db": 19.813236236572266
+      },
+      {
+        "iteration": 69,
+        "psnr_db": 19.824342956542967
+      },
+      {
+        "iteration": 70,
+        "psnr_db": 19.835021057128905
+      },
+      {
+        "iteration": 71,
+        "psnr_db": 19.845266265869142
+      },
+      {
+        "iteration": 72,
+        "psnr_db": 19.85509231567383
+      },
+      {
+        "iteration": 73,
+        "psnr_db": 19.864505767822266
+      },
+      {
+        "iteration": 74,
+        "psnr_db": 19.87352035522461
+      },
+      {
+        "iteration": 75,
+        "psnr_db": 19.882143096923826
+      },
+      {
+        "iteration": 76,
+        "psnr_db": 19.890387725830077
+      },
+      {
+        "iteration": 77,
+        "psnr_db": 19.89824234008789
+      },
+      {
+        "iteration": 78,
+        "psnr_db": 19.905735778808594
+      },
+      {
+        "iteration": 79,
+        "psnr_db": 19.912869262695313
+      },
+      {
+        "iteration": 80,
+        "psnr_db": 19.9196418762207
+      },
+      {
+        "iteration": 81,
+        "psnr_db": 19.9260595703125
+      },
+      {
+        "iteration": 82,
+        "psnr_db": 19.932122192382813
+      },
+      {
+        "iteration": 83,
+        "psnr_db": 19.937829742431642
+      },
+      {
+        "iteration": 84,
+        "psnr_db": 19.94318389892578
+      },
+      {
+        "iteration": 85,
+        "psnr_db": 19.948187255859374
+      },
+      {
+        "iteration": 86,
+        "psnr_db": 19.952835998535157
+      },
+      {
+        "iteration": 87,
+        "psnr_db": 19.95715087890625
+      },
+      {
+        "iteration": 88,
+        "psnr_db": 19.96113265991211
+      },
+      {
+        "iteration": 89,
+        "psnr_db": 19.96478454589844
+      },
+      {
+        "iteration": 90,
+        "psnr_db": 19.968118286132814
+      },
+      {
+        "iteration": 91,
+        "psnr_db": 19.971136932373046
+      },
+      {
+        "iteration": 92,
+        "psnr_db": 19.973830261230468
+      },
+      {
+        "iteration": 93,
+        "psnr_db": 19.97621337890625
+      },
+      {
+        "iteration": 94,
+        "psnr_db": 19.978290252685547
+      },
+      {
+        "iteration": 95,
+        "psnr_db": 19.98007095336914
+      },
+      {
+        "iteration": 96,
+        "psnr_db": 19.98155029296875
+      },
+      {
+        "iteration": 97,
+        "psnr_db": 19.982745971679687
+      },
+      {
+        "iteration": 98,
+        "psnr_db": 19.98366470336914
+      },
+      {
+        "iteration": 99,
+        "psnr_db": 19.98429733276367
+      },
+      {
+        "iteration": 100,
+        "psnr_db": 19.98464599609375
+      },
+      {
+        "iteration": 101,
+        "psnr_db": 19.984717712402343
+      },
+      {
+        "iteration": 102,
+        "psnr_db": 19.984510040283205
+      },
+      {
+        "iteration": 103,
+        "psnr_db": 19.984024200439453
+      },
+      {
+        "iteration": 104,
+        "psnr_db": 19.983282775878905
+      },
+      {
+        "iteration": 105,
+        "psnr_db": 19.98228530883789
+      },
+      {
+        "iteration": 106,
+        "psnr_db": 19.98103561401367
+      },
+      {
+        "iteration": 107,
+        "psnr_db": 19.97953598022461
+      },
+      {
+        "iteration": 108,
+        "psnr_db": 19.977789001464842
+      },
+      {
+        "iteration": 109,
+        "psnr_db": 19.97579116821289
+      },
+      {
+        "iteration": 110,
+        "psnr_db": 19.97355514526367
+      },
+      {
+        "iteration": 111,
+        "psnr_db": 19.971080780029297
+      },
+      {
+        "iteration": 112,
+        "psnr_db": 19.96837356567383
+      },
+      {
+        "iteration": 113,
+        "psnr_db": 19.965443572998048
+      },
+      {
+        "iteration": 114,
+        "psnr_db": 19.962298583984374
+      },
+      {
+        "iteration": 115,
+        "psnr_db": 19.958945007324218
+      },
+      {
+        "iteration": 116,
+        "psnr_db": 19.955384674072267
+      },
+      {
+        "iteration": 117,
+        "psnr_db": 19.95161865234375
+      },
+      {
+        "iteration": 118,
+        "psnr_db": 19.94765396118164
+      },
+      {
+        "iteration": 119,
+        "psnr_db": 19.94349807739258
+      },
+      {
+        "iteration": 120,
+        "psnr_db": 19.93915771484375
+      },
+      {
+        "iteration": 121,
+        "psnr_db": 19.934634704589843
+      },
+      {
+        "iteration": 122,
+        "psnr_db": 19.929932708740235
+      },
+      {
+        "iteration": 123,
+        "psnr_db": 19.925049438476563
+      },
+      {
+        "iteration": 124,
+        "psnr_db": 19.919993438720702
+      },
+      {
+        "iteration": 125,
+        "psnr_db": 19.914771270751952
+      },
+      {
+        "iteration": 126,
+        "psnr_db": 19.90938247680664
+      },
+      {
+        "iteration": 127,
+        "psnr_db": 19.903831329345703
+      },
+      {
+        "iteration": 128,
+        "psnr_db": 19.89812301635742
+      },
+      {
+        "iteration": 129,
+        "psnr_db": 19.892265625
+      },
+      {
+        "iteration": 130,
+        "psnr_db": 19.886260375976562
+      },
+      {
+        "iteration": 131,
+        "psnr_db": 19.880115814208985
+      },
+      {
+        "iteration": 132,
+        "psnr_db": 19.873832397460937
+      },
+      {
+        "iteration": 133,
+        "psnr_db": 19.86741409301758
+      },
+      {
+        "iteration": 134,
+        "psnr_db": 19.86086410522461
+      },
+      {
+        "iteration": 135,
+        "psnr_db": 19.85418960571289
+      },
+      {
+        "iteration": 136,
+        "psnr_db": 19.847391052246095
+      },
+      {
+        "iteration": 137,
+        "psnr_db": 19.840475006103517
+      },
+      {
+        "iteration": 138,
+        "psnr_db": 19.833445587158202
+      },
+      {
+        "iteration": 139,
+        "psnr_db": 19.826302642822267
+      },
+      {
+        "iteration": 140,
+        "psnr_db": 19.819049377441406
+      },
+      {
+        "iteration": 141,
+        "psnr_db": 19.811692352294923
+      },
+      {
+        "iteration": 142,
+        "psnr_db": 19.80424087524414
+      },
+      {
+        "iteration": 143,
+        "psnr_db": 19.796694946289062
+      },
+      {
+        "iteration": 144,
+        "psnr_db": 19.789054718017578
+      },
+      {
+        "iteration": 145,
+        "psnr_db": 19.78132095336914
+      },
+      {
+        "iteration": 146,
+        "psnr_db": 19.77349609375
+      },
+      {
+        "iteration": 147,
+        "psnr_db": 19.76558837890625
+      },
+      {
+        "iteration": 148,
+        "psnr_db": 19.757599334716797
+      },
+      {
+        "iteration": 149,
+        "psnr_db": 19.749532623291017
+      },
+      {
+        "iteration": 150,
+        "psnr_db": 19.741387176513673
+      },
+      {
+        "iteration": 151,
+        "psnr_db": 19.733168487548827
+      },
+      {
+        "iteration": 152,
+        "psnr_db": 19.72487564086914
+      },
+      {
+        "iteration": 153,
+        "psnr_db": 19.716512451171877
+      },
+      {
+        "iteration": 154,
+        "psnr_db": 19.70807861328125
+      },
+      {
+        "iteration": 155,
+        "psnr_db": 19.699582977294924
+      },
+      {
+        "iteration": 156,
+        "psnr_db": 19.691027221679686
+      },
+      {
+        "iteration": 157,
+        "psnr_db": 19.682413330078123
+      },
+      {
+        "iteration": 158,
+        "psnr_db": 19.673744049072265
+      },
+      {
+        "iteration": 159,
+        "psnr_db": 19.665018615722655
+      },
+      {
+        "iteration": 160,
+        "psnr_db": 19.65624282836914
+      },
+      {
+        "iteration": 161,
+        "psnr_db": 19.64741912841797
+      },
+      {
+        "iteration": 162,
+        "psnr_db": 19.638549041748046
+      },
+      {
+        "iteration": 163,
+        "psnr_db": 19.62963623046875
+      },
+      {
+        "iteration": 164,
+        "psnr_db": 19.62068130493164
+      },
+      {
+        "iteration": 165,
+        "psnr_db": 19.611686553955078
+      },
+      {
+        "iteration": 166,
+        "psnr_db": 19.602654113769532
+      },
+      {
+        "iteration": 167,
+        "psnr_db": 19.593585968017578
+      },
+      {
+        "iteration": 168,
+        "psnr_db": 19.584483184814452
+      },
+      {
+        "iteration": 169,
+        "psnr_db": 19.575350494384764
+      },
+      {
+        "iteration": 170,
+        "psnr_db": 19.56618713378906
+      },
+      {
+        "iteration": 171,
+        "psnr_db": 19.55699447631836
+      },
+      {
+        "iteration": 172,
+        "psnr_db": 19.547774810791015
+      },
+      {
+        "iteration": 173,
+        "psnr_db": 19.53853057861328
+      },
+      {
+        "iteration": 174,
+        "psnr_db": 19.5292643737793
+      },
+      {
+        "iteration": 175,
+        "psnr_db": 19.519977264404297
+      },
+      {
+        "iteration": 176,
+        "psnr_db": 19.510672912597656
+      },
+      {
+        "iteration": 177,
+        "psnr_db": 19.501351776123048
+      },
+      {
+        "iteration": 178,
+        "psnr_db": 19.492012634277344
+      },
+      {
+        "iteration": 179,
+        "psnr_db": 19.482657775878906
+      },
+      {
+        "iteration": 180,
+        "psnr_db": 19.473288269042968
+      },
+      {
+        "iteration": 181,
+        "psnr_db": 19.463907470703123
+      },
+      {
+        "iteration": 182,
+        "psnr_db": 19.454514770507814
+      },
+      {
+        "iteration": 183,
+        "psnr_db": 19.445113067626952
+      },
+      {
+        "iteration": 184,
+        "psnr_db": 19.43570297241211
+      },
+      {
+        "iteration": 185,
+        "psnr_db": 19.42628601074219
+      },
+      {
+        "iteration": 186,
+        "psnr_db": 19.416863098144532
+      },
+      {
+        "iteration": 187,
+        "psnr_db": 19.40743362426758
+      },
+      {
+        "iteration": 188,
+        "psnr_db": 19.398002319335937
+      },
+      {
+        "iteration": 189,
+        "psnr_db": 19.388568267822265
+      },
+      {
+        "iteration": 190,
+        "psnr_db": 19.379132080078126
+      },
+      {
+        "iteration": 191,
+        "psnr_db": 19.369696044921874
+      },
+      {
+        "iteration": 192,
+        "psnr_db": 19.360260467529297
+      },
+      {
+        "iteration": 193,
+        "psnr_db": 19.350828094482424
+      },
+      {
+        "iteration": 194,
+        "psnr_db": 19.34139907836914
+      },
+      {
+        "iteration": 195,
+        "psnr_db": 19.331973419189453
+      },
+      {
+        "iteration": 196,
+        "psnr_db": 19.32255310058594
+      },
+      {
+        "iteration": 197,
+        "psnr_db": 19.313138275146486
+      },
+      {
+        "iteration": 198,
+        "psnr_db": 19.303730926513673
+      },
+      {
+        "iteration": 199,
+        "psnr_db": 19.294331512451173
+      },
+      {
+        "iteration": 200,
+        "psnr_db": 19.284939575195313
+      },
+      {
+        "iteration": 201,
+        "psnr_db": 19.27555694580078
+      },
+      {
+        "iteration": 202,
+        "psnr_db": 19.266185455322265
+      },
+      {
+        "iteration": 203,
+        "psnr_db": 19.256824645996094
+      },
+      {
+        "iteration": 204,
+        "psnr_db": 19.247474212646484
+      },
+      {
+        "iteration": 205,
+        "psnr_db": 19.238136444091797
+      },
+      {
+        "iteration": 206,
+        "psnr_db": 19.228809967041016
+      },
+      {
+        "iteration": 207,
+        "psnr_db": 19.219498291015626
+      },
+      {
+        "iteration": 208,
+        "psnr_db": 19.21020050048828
+      },
+      {
+        "iteration": 209,
+        "psnr_db": 19.20091796875
+      },
+      {
+        "iteration": 210,
+        "psnr_db": 19.191651458740235
+      },
+      {
+        "iteration": 211,
+        "psnr_db": 19.18239990234375
+      },
+      {
+        "iteration": 212,
+        "psnr_db": 19.173165283203126
+      },
+      {
+        "iteration": 213,
+        "psnr_db": 19.163946838378905
+      },
+      {
+        "iteration": 214,
+        "psnr_db": 19.15474624633789
+      },
+      {
+        "iteration": 215,
+        "psnr_db": 19.145562896728517
+      },
+      {
+        "iteration": 216,
+        "psnr_db": 19.13639892578125
+      },
+      {
+        "iteration": 217,
+        "psnr_db": 19.12725372314453
+      },
+      {
+        "iteration": 218,
+        "psnr_db": 19.11812805175781
+      },
+      {
+        "iteration": 219,
+        "psnr_db": 19.109022064208986
+      },
+      {
+        "iteration": 220,
+        "psnr_db": 19.099937286376953
+      },
+      {
+        "iteration": 221,
+        "psnr_db": 19.090874633789063
+      },
+      {
+        "iteration": 222,
+        "psnr_db": 19.081832122802734
+      },
+      {
+        "iteration": 223,
+        "psnr_db": 19.072810821533203
+      },
+      {
+        "iteration": 224,
+        "psnr_db": 19.063810424804686
+      },
+      {
+        "iteration": 225,
+        "psnr_db": 19.05483352661133
+      },
+      {
+        "iteration": 226,
+        "psnr_db": 19.045879974365235
+      },
+      {
+        "iteration": 227,
+        "psnr_db": 19.036949157714844
+      },
+      {
+        "iteration": 228,
+        "psnr_db": 19.028040771484374
+      },
+      {
+        "iteration": 229,
+        "psnr_db": 19.019156188964843
+      },
+      {
+        "iteration": 230,
+        "psnr_db": 19.01029571533203
+      },
+      {
+        "iteration": 231,
+        "psnr_db": 19.001459197998045
+      },
+      {
+        "iteration": 232,
+        "psnr_db": 18.99264724731445
+      },
+      {
+        "iteration": 233,
+        "psnr_db": 18.983859405517578
+      },
+      {
+        "iteration": 234,
+        "psnr_db": 18.975096588134765
+      },
+      {
+        "iteration": 235,
+        "psnr_db": 18.96635772705078
+      },
+      {
+        "iteration": 236,
+        "psnr_db": 18.957645111083984
+      },
+      {
+        "iteration": 237,
+        "psnr_db": 18.948955688476563
+      },
+      {
+        "iteration": 238,
+        "psnr_db": 18.940293273925782
+      },
+      {
+        "iteration": 239,
+        "psnr_db": 18.931655883789062
+      },
+      {
+        "iteration": 240,
+        "psnr_db": 18.923045196533202
+      },
+      {
+        "iteration": 241,
+        "psnr_db": 18.914461364746092
+      },
+      {
+        "iteration": 242,
+        "psnr_db": 18.905903625488282
+      },
+      {
+        "iteration": 243,
+        "psnr_db": 18.89737274169922
+      },
+      {
+        "iteration": 244,
+        "psnr_db": 18.888868103027345
+      },
+      {
+        "iteration": 245,
+        "psnr_db": 18.880389556884765
+      },
+      {
+        "iteration": 246,
+        "psnr_db": 18.87193908691406
+      },
+      {
+        "iteration": 247,
+        "psnr_db": 18.86351531982422
+      },
+      {
+        "iteration": 248,
+        "psnr_db": 18.855118255615235
+      },
+      {
+        "iteration": 249,
+        "psnr_db": 18.846749572753907
+      },
+      {
+        "iteration": 250,
+        "psnr_db": 18.838406829833986
+      },
+      {
+        "iteration": 251,
+        "psnr_db": 18.830091552734373
+      },
+      {
+        "iteration": 252,
+        "psnr_db": 18.82180389404297
+      },
+      {
+        "iteration": 253,
+        "psnr_db": 18.813544464111327
+      },
+      {
+        "iteration": 254,
+        "psnr_db": 18.80531280517578
+      },
+      {
+        "iteration": 255,
+        "psnr_db": 18.79710739135742
+      },
+      {
+        "iteration": 256,
+        "psnr_db": 18.78893005371094
+      },
+      {
+        "iteration": 257,
+        "psnr_db": 18.780780334472656
+      },
+      {
+        "iteration": 258,
+        "psnr_db": 18.772659454345703
+      },
+      {
+        "iteration": 259,
+        "psnr_db": 18.76456497192383
+      },
+      {
+        "iteration": 260,
+        "psnr_db": 18.756498565673827
+      },
+      {
+        "iteration": 261,
+        "psnr_db": 18.748461303710936
+      },
+      {
+        "iteration": 262,
+        "psnr_db": 18.740452270507813
+      },
+      {
+        "iteration": 263,
+        "psnr_db": 18.732471618652344
+      },
+      {
+        "iteration": 264,
+        "psnr_db": 18.72451904296875
+      },
+      {
+        "iteration": 265,
+        "psnr_db": 18.716595611572266
+      },
+      {
+        "iteration": 266,
+        "psnr_db": 18.708700103759767
+      },
+      {
+        "iteration": 267,
+        "psnr_db": 18.700833282470704
+      },
+      {
+        "iteration": 268,
+        "psnr_db": 18.692995147705076
+      },
+      {
+        "iteration": 269,
+        "psnr_db": 18.68518524169922
+      },
+      {
+        "iteration": 270,
+        "psnr_db": 18.6774040222168
+      },
+      {
+        "iteration": 271,
+        "psnr_db": 18.66965087890625
+      },
+      {
+        "iteration": 272,
+        "psnr_db": 18.661927337646485
+      },
+      {
+        "iteration": 273,
+        "psnr_db": 18.65423141479492
+      },
+      {
+        "iteration": 274,
+        "psnr_db": 18.646563568115234
+      },
+      {
+        "iteration": 275,
+        "psnr_db": 18.638923797607422
+      },
+      {
+        "iteration": 276,
+        "psnr_db": 18.631312713623046
+      },
+      {
+        "iteration": 277,
+        "psnr_db": 18.623728790283202
+      },
+      {
+        "iteration": 278,
+        "psnr_db": 18.61617401123047
+      },
+      {
+        "iteration": 279,
+        "psnr_db": 18.608646850585938
+      },
+      {
+        "iteration": 280,
+        "psnr_db": 18.60114730834961
+      },
+      {
+        "iteration": 281,
+        "psnr_db": 18.59367721557617
+      },
+      {
+        "iteration": 282,
+        "psnr_db": 18.586234588623046
+      },
+      {
+        "iteration": 283,
+        "psnr_db": 18.57882019042969
+      },
+      {
+        "iteration": 284,
+        "psnr_db": 18.571434478759766
+      },
+      {
+        "iteration": 285,
+        "psnr_db": 18.564076385498048
+      },
+      {
+        "iteration": 286,
+        "psnr_db": 18.55674621582031
+      },
+      {
+        "iteration": 287,
+        "psnr_db": 18.549444122314455
+      },
+      {
+        "iteration": 288,
+        "psnr_db": 18.542169647216795
+      },
+      {
+        "iteration": 289,
+        "psnr_db": 18.534923248291015
+      },
+      {
+        "iteration": 290,
+        "psnr_db": 18.527703857421876
+      },
+      {
+        "iteration": 291,
+        "psnr_db": 18.520513000488283
+      },
+      {
+        "iteration": 292,
+        "psnr_db": 18.51334930419922
+      },
+      {
+        "iteration": 293,
+        "psnr_db": 18.506212615966795
+      },
+      {
+        "iteration": 294,
+        "psnr_db": 18.499103240966797
+      },
+      {
+        "iteration": 295,
+        "psnr_db": 18.49202102661133
+      },
+      {
+        "iteration": 296,
+        "psnr_db": 18.48496612548828
+      },
+      {
+        "iteration": 297,
+        "psnr_db": 18.477938995361328
+      },
+      {
+        "iteration": 298,
+        "psnr_db": 18.470939178466796
+      },
+      {
+        "iteration": 299,
+        "psnr_db": 18.463965606689452
+      },
+      {
+        "iteration": 300,
+        "psnr_db": 18.457020111083985
+      }
+    ],
+    "selected_iteration": 101,
+    "val_psnr_db": 19.984717712402343
+  },
+  "leap-sart": {
+    "curve": [
+      {
+        "iteration": 1,
+        "psnr_db": 13.832449493408204
+      },
+      {
+        "iteration": 2,
+        "psnr_db": 14.515667724609376
+      },
+      {
+        "iteration": 3,
+        "psnr_db": 15.95136001586914
+      },
+      {
+        "iteration": 4,
+        "psnr_db": 16.099900360107423
+      },
+      {
+        "iteration": 5,
+        "psnr_db": 16.256719970703124
+      },
+      {
+        "iteration": 6,
+        "psnr_db": 16.358369750976564
+      },
+      {
+        "iteration": 7,
+        "psnr_db": 16.186302642822266
+      },
+      {
+        "iteration": 8,
+        "psnr_db": 16.260159454345704
+      },
+      {
+        "iteration": 9,
+        "psnr_db": 16.112738800048827
+      },
+      {
+        "iteration": 10,
+        "psnr_db": 16.14144256591797
+      },
+      {
+        "iteration": 11,
+        "psnr_db": 16.058450164794923
+      },
+      {
+        "iteration": 12,
+        "psnr_db": 16.04194793701172
+      },
+      {
+        "iteration": 13,
+        "psnr_db": 16.00727828979492
+      },
+      {
+        "iteration": 14,
+        "psnr_db": 15.968015441894531
+      },
+      {
+        "iteration": 15,
+        "psnr_db": 15.957500305175781
+      },
+      {
+        "iteration": 16,
+        "psnr_db": 15.915105895996094
+      },
+      {
+        "iteration": 17,
+        "psnr_db": 15.910959777832032
+      },
+      {
+        "iteration": 18,
+        "psnr_db": 15.875326232910156
+      },
+      {
+        "iteration": 19,
+        "psnr_db": 15.868555908203126
+      },
+      {
+        "iteration": 20,
+        "psnr_db": 15.842550354003906
+      },
+      {
+        "iteration": 21,
+        "psnr_db": 15.831400146484375
+      },
+      {
+        "iteration": 22,
+        "psnr_db": 15.813108978271485
+      },
+      {
+        "iteration": 23,
+        "psnr_db": 15.799603881835937
+      },
+      {
+        "iteration": 24,
+        "psnr_db": 15.785454711914063
+      },
+      {
+        "iteration": 25,
+        "psnr_db": 15.771903991699219
+      },
+      {
+        "iteration": 26,
+        "psnr_db": 15.759397277832031
+      },
+      {
+        "iteration": 27,
+        "psnr_db": 15.747014770507812
+      },
+      {
+        "iteration": 28,
+        "psnr_db": 15.735119171142578
+      },
+      {
+        "iteration": 29,
+        "psnr_db": 15.723983154296874
+      },
+      {
+        "iteration": 30,
+        "psnr_db": 15.712539367675781
+      },
+      {
+        "iteration": 31,
+        "psnr_db": 15.702292022705079
+      },
+      {
+        "iteration": 32,
+        "psnr_db": 15.691483306884766
+      },
+      {
+        "iteration": 33,
+        "psnr_db": 15.68176727294922
+      },
+      {
+        "iteration": 34,
+        "psnr_db": 15.671645965576172
+      },
+      {
+        "iteration": 35,
+        "psnr_db": 15.662293548583984
+      },
+      {
+        "iteration": 36,
+        "psnr_db": 15.652785339355468
+      },
+      {
+        "iteration": 37,
+        "psnr_db": 15.643769989013672
+      },
+      {
+        "iteration": 38,
+        "psnr_db": 15.634729919433594
+      },
+      {
+        "iteration": 39,
+        "psnr_db": 15.626030578613282
+      },
+      {
+        "iteration": 40,
+        "psnr_db": 15.617371063232422
+      },
+      {
+        "iteration": 41,
+        "psnr_db": 15.609024810791016
+      },
+      {
+        "iteration": 42,
+        "psnr_db": 15.600691375732422
+      },
+      {
+        "iteration": 43,
+        "psnr_db": 15.592648010253907
+      },
+      {
+        "iteration": 44,
+        "psnr_db": 15.584612731933595
+      },
+      {
+        "iteration": 45,
+        "psnr_db": 15.57683822631836
+      },
+      {
+        "iteration": 46,
+        "psnr_db": 15.569063873291016
+      },
+      {
+        "iteration": 47,
+        "psnr_db": 15.561494140625
+      },
+      {
+        "iteration": 48,
+        "psnr_db": 15.553975067138673
+      },
+      {
+        "iteration": 49,
+        "psnr_db": 15.54662841796875
+      },
+      {
+        "iteration": 50,
+        "psnr_db": 15.539336547851562
+      },
+      {
+        "iteration": 51,
+        "psnr_db": 15.532175903320313
+      },
+      {
+        "iteration": 52,
+        "psnr_db": 15.525076751708985
+      },
+      {
+        "iteration": 53,
+        "psnr_db": 15.518094024658204
+      },
+      {
+        "iteration": 54,
+        "psnr_db": 15.511170349121095
+      },
+      {
+        "iteration": 55,
+        "psnr_db": 15.504342346191406
+      },
+      {
+        "iteration": 56,
+        "psnr_db": 15.497584381103515
+      },
+      {
+        "iteration": 57,
+        "psnr_db": 15.490924682617187
+      },
+      {
+        "iteration": 58,
+        "psnr_db": 15.4843310546875
+      },
+      {
+        "iteration": 59,
+        "psnr_db": 15.47783447265625
+      },
+      {
+        "iteration": 60,
+        "psnr_db": 15.471392364501954
+      },
+      {
+        "iteration": 61,
+        "psnr_db": 15.465024261474609
+      },
+      {
+        "iteration": 62,
+        "psnr_db": 15.4587158203125
+      },
+      {
+        "iteration": 63,
+        "psnr_db": 15.452481231689454
+      },
+      {
+        "iteration": 64,
+        "psnr_db": 15.446298828125
+      },
+      {
+        "iteration": 65,
+        "psnr_db": 15.440185089111328
+      },
+      {
+        "iteration": 66,
+        "psnr_db": 15.434123840332031
+      },
+      {
+        "iteration": 67,
+        "psnr_db": 15.428125762939453
+      },
+      {
+        "iteration": 68,
+        "psnr_db": 15.422194213867188
+      },
+      {
+        "iteration": 69,
+        "psnr_db": 15.416327667236327
+      },
+      {
+        "iteration": 70,
+        "psnr_db": 15.410514831542969
+      },
+      {
+        "iteration": 71,
+        "psnr_db": 15.404756774902344
+      },
+      {
+        "iteration": 72,
+        "psnr_db": 15.399043731689453
+      },
+      {
+        "iteration": 73,
+        "psnr_db": 15.393372650146484
+      },
+      {
+        "iteration": 74,
+        "psnr_db": 15.387743530273438
+      },
+      {
+        "iteration": 75,
+        "psnr_db": 15.382162475585938
+      },
+      {
+        "iteration": 76,
+        "psnr_db": 15.376628875732422
+      },
+      {
+        "iteration": 77,
+        "psnr_db": 15.371142120361329
+      },
+      {
+        "iteration": 78,
+        "psnr_db": 15.365696868896485
+      },
+      {
+        "iteration": 79,
+        "psnr_db": 15.360296630859375
+      },
+      {
+        "iteration": 80,
+        "psnr_db": 15.354935607910157
+      },
+      {
+        "iteration": 81,
+        "psnr_db": 15.349613189697266
+      },
+      {
+        "iteration": 82,
+        "psnr_db": 15.344325103759765
+      },
+      {
+        "iteration": 83,
+        "psnr_db": 15.339073486328125
+      },
+      {
+        "iteration": 84,
+        "psnr_db": 15.33385482788086
+      },
+      {
+        "iteration": 85,
+        "psnr_db": 15.328675231933595
+      },
+      {
+        "iteration": 86,
+        "psnr_db": 15.323529815673828
+      },
+      {
+        "iteration": 87,
+        "psnr_db": 15.318419494628905
+      },
+      {
+        "iteration": 88,
+        "psnr_db": 15.313336486816405
+      },
+      {
+        "iteration": 89,
+        "psnr_db": 15.308282012939452
+      },
+      {
+        "iteration": 90,
+        "psnr_db": 15.303256530761718
+      },
+      {
+        "iteration": 91,
+        "psnr_db": 15.298255004882812
+      },
+      {
+        "iteration": 92,
+        "psnr_db": 15.293277740478516
+      },
+      {
+        "iteration": 93,
+        "psnr_db": 15.288325653076171
+      },
+      {
+        "iteration": 94,
+        "psnr_db": 15.283398895263671
+      },
+      {
+        "iteration": 95,
+        "psnr_db": 15.278491973876953
+      },
+      {
+        "iteration": 96,
+        "psnr_db": 15.273611602783204
+      },
+      {
+        "iteration": 97,
+        "psnr_db": 15.268751373291016
+      },
+      {
+        "iteration": 98,
+        "psnr_db": 15.263912200927734
+      },
+      {
+        "iteration": 99,
+        "psnr_db": 15.259093933105468
+      },
+      {
+        "iteration": 100,
+        "psnr_db": 15.254300689697265
+      },
+      {
+        "iteration": 101,
+        "psnr_db": 15.249531555175782
+      },
+      {
+        "iteration": 102,
+        "psnr_db": 15.244784851074218
+      },
+      {
+        "iteration": 103,
+        "psnr_db": 15.240061798095702
+      },
+      {
+        "iteration": 104,
+        "psnr_db": 15.235357513427735
+      },
+      {
+        "iteration": 105,
+        "psnr_db": 15.230679626464843
+      },
+      {
+        "iteration": 106,
+        "psnr_db": 15.22602569580078
+      },
+      {
+        "iteration": 107,
+        "psnr_db": 15.22139617919922
+      },
+      {
+        "iteration": 108,
+        "psnr_db": 15.216790771484375
+      },
+      {
+        "iteration": 109,
+        "psnr_db": 15.212208709716798
+      },
+      {
+        "iteration": 110,
+        "psnr_db": 15.207650756835937
+      },
+      {
+        "iteration": 111,
+        "psnr_db": 15.20311294555664
+      },
+      {
+        "iteration": 112,
+        "psnr_db": 15.198594360351562
+      },
+      {
+        "iteration": 113,
+        "psnr_db": 15.194092102050782
+      },
+      {
+        "iteration": 114,
+        "psnr_db": 15.189605407714843
+      },
+      {
+        "iteration": 115,
+        "psnr_db": 15.185135955810546
+      },
+      {
+        "iteration": 116,
+        "psnr_db": 15.180682830810547
+      },
+      {
+        "iteration": 117,
+        "psnr_db": 15.176248016357421
+      },
+      {
+        "iteration": 118,
+        "psnr_db": 15.171829223632812
+      },
+      {
+        "iteration": 119,
+        "psnr_db": 15.16742401123047
+      },
+      {
+        "iteration": 120,
+        "psnr_db": 15.163039245605468
+      },
+      {
+        "iteration": 121,
+        "psnr_db": 15.158667907714843
+      },
+      {
+        "iteration": 122,
+        "psnr_db": 15.154315185546874
+      },
+      {
+        "iteration": 123,
+        "psnr_db": 15.149981231689454
+      },
+      {
+        "iteration": 124,
+        "psnr_db": 15.145667114257812
+      },
+      {
+        "iteration": 125,
+        "psnr_db": 15.141371307373047
+      },
+      {
+        "iteration": 126,
+        "psnr_db": 15.137093505859376
+      },
+      {
+        "iteration": 127,
+        "psnr_db": 15.132830963134765
+      },
+      {
+        "iteration": 128,
+        "psnr_db": 15.12858169555664
+      },
+      {
+        "iteration": 129,
+        "psnr_db": 15.124346466064454
+      },
+      {
+        "iteration": 130,
+        "psnr_db": 15.120123291015625
+      },
+      {
+        "iteration": 131,
+        "psnr_db": 15.115915069580078
+      },
+      {
+        "iteration": 132,
+        "psnr_db": 15.111719970703126
+      },
+      {
+        "iteration": 133,
+        "psnr_db": 15.10753890991211
+      },
+      {
+        "iteration": 134,
+        "psnr_db": 15.103370971679688
+      },
+      {
+        "iteration": 135,
+        "psnr_db": 15.099212036132812
+      },
+      {
+        "iteration": 136,
+        "psnr_db": 15.095066375732422
+      },
+      {
+        "iteration": 137,
+        "psnr_db": 15.090934295654296
+      },
+      {
+        "iteration": 138,
+        "psnr_db": 15.086814880371094
+      },
+      {
+        "iteration": 139,
+        "psnr_db": 15.082710876464844
+      },
+      {
+        "iteration": 140,
+        "psnr_db": 15.078621520996094
+      },
+      {
+        "iteration": 141,
+        "psnr_db": 15.074542999267578
+      },
+      {
+        "iteration": 142,
+        "psnr_db": 15.070478210449219
+      },
+      {
+        "iteration": 143,
+        "psnr_db": 15.066427764892579
+      },
+      {
+        "iteration": 144,
+        "psnr_db": 15.062395935058595
+      },
+      {
+        "iteration": 145,
+        "psnr_db": 15.058377532958984
+      },
+      {
+        "iteration": 146,
+        "psnr_db": 15.054371490478516
+      },
+      {
+        "iteration": 147,
+        "psnr_db": 15.050371551513672
+      },
+      {
+        "iteration": 148,
+        "psnr_db": 15.046379852294923
+      },
+      {
+        "iteration": 149,
+        "psnr_db": 15.042399291992188
+      },
+      {
+        "iteration": 150,
+        "psnr_db": 15.038425903320313
+      },
+      {
+        "iteration": 151,
+        "psnr_db": 15.034464416503907
+      },
+      {
+        "iteration": 152,
+        "psnr_db": 15.030513305664062
+      },
+      {
+        "iteration": 153,
+        "psnr_db": 15.026574249267577
+      },
+      {
+        "iteration": 154,
+        "psnr_db": 15.022643737792968
+      },
+      {
+        "iteration": 155,
+        "psnr_db": 15.018722534179688
+      },
+      {
+        "iteration": 156,
+        "psnr_db": 15.014807891845702
+      },
+      {
+        "iteration": 157,
+        "psnr_db": 15.010899505615235
+      },
+      {
+        "iteration": 158,
+        "psnr_db": 15.006999816894531
+      },
+      {
+        "iteration": 159,
+        "psnr_db": 15.003109436035157
+      },
+      {
+        "iteration": 160,
+        "psnr_db": 14.99922866821289
+      },
+      {
+        "iteration": 161,
+        "psnr_db": 14.995357360839844
+      },
+      {
+        "iteration": 162,
+        "psnr_db": 14.991496429443359
+      },
+      {
+        "iteration": 163,
+        "psnr_db": 14.987647399902343
+      },
+      {
+        "iteration": 164,
+        "psnr_db": 14.983810272216797
+      },
+      {
+        "iteration": 165,
+        "psnr_db": 14.979984130859375
+      },
+      {
+        "iteration": 166,
+        "psnr_db": 14.976167449951172
+      },
+      {
+        "iteration": 167,
+        "psnr_db": 14.97236083984375
+      },
+      {
+        "iteration": 168,
+        "psnr_db": 14.968562774658203
+      },
+      {
+        "iteration": 169,
+        "psnr_db": 14.964769287109375
+      },
+      {
+        "iteration": 170,
+        "psnr_db": 14.960984039306641
+      },
+      {
+        "iteration": 171,
+        "psnr_db": 14.957208557128906
+      },
+      {
+        "iteration": 172,
+        "psnr_db": 14.953443145751953
+      },
+      {
+        "iteration": 173,
+        "psnr_db": 14.949686431884766
+      },
+      {
+        "iteration": 174,
+        "psnr_db": 14.945936889648438
+      },
+      {
+        "iteration": 175,
+        "psnr_db": 14.94219451904297
+      },
+      {
+        "iteration": 176,
+        "psnr_db": 14.93845947265625
+      },
+      {
+        "iteration": 177,
+        "psnr_db": 14.934732513427734
+      },
+      {
+        "iteration": 178,
+        "psnr_db": 14.931013488769532
+      },
+      {
+        "iteration": 179,
+        "psnr_db": 14.927300262451173
+      },
+      {
+        "iteration": 180,
+        "psnr_db": 14.923594818115234
+      },
+      {
+        "iteration": 181,
+        "psnr_db": 14.919895477294922
+      },
+      {
+        "iteration": 182,
+        "psnr_db": 14.916204071044922
+      },
+      {
+        "iteration": 183,
+        "psnr_db": 14.91251953125
+      },
+      {
+        "iteration": 184,
+        "psnr_db": 14.90884307861328
+      },
+      {
+        "iteration": 185,
+        "psnr_db": 14.905173797607421
+      },
+      {
+        "iteration": 186,
+        "psnr_db": 14.9015087890625
+      },
+      {
+        "iteration": 187,
+        "psnr_db": 14.897850189208985
+      },
+      {
+        "iteration": 188,
+        "psnr_db": 14.894198760986328
+      },
+      {
+        "iteration": 189,
+        "psnr_db": 14.890554504394531
+      },
+      {
+        "iteration": 190,
+        "psnr_db": 14.886916809082031
+      },
+      {
+        "iteration": 191,
+        "psnr_db": 14.883284912109374
+      },
+      {
+        "iteration": 192,
+        "psnr_db": 14.879657592773437
+      },
+      {
+        "iteration": 193,
+        "psnr_db": 14.876036376953126
+      },
+      {
+        "iteration": 194,
+        "psnr_db": 14.872420196533204
+      },
+      {
+        "iteration": 195,
+        "psnr_db": 14.868810424804687
+      },
+      {
+        "iteration": 196,
+        "psnr_db": 14.86520523071289
+      },
+      {
+        "iteration": 197,
+        "psnr_db": 14.861607360839844
+      },
+      {
+        "iteration": 198,
+        "psnr_db": 14.858014678955078
+      },
+      {
+        "iteration": 199,
+        "psnr_db": 14.854427185058594
+      },
+      {
+        "iteration": 200,
+        "psnr_db": 14.850845947265626
+      },
+      {
+        "iteration": 201,
+        "psnr_db": 14.847270050048827
+      },
+      {
+        "iteration": 202,
+        "psnr_db": 14.8436962890625
+      },
+      {
+        "iteration": 203,
+        "psnr_db": 14.840128631591798
+      },
+      {
+        "iteration": 204,
+        "psnr_db": 14.836566467285156
+      },
+      {
+        "iteration": 205,
+        "psnr_db": 14.833008422851563
+      },
+      {
+        "iteration": 206,
+        "psnr_db": 14.829454345703125
+      },
+      {
+        "iteration": 207,
+        "psnr_db": 14.825904388427734
+      },
+      {
+        "iteration": 208,
+        "psnr_db": 14.822358245849609
+      },
+      {
+        "iteration": 209,
+        "psnr_db": 14.818816680908203
+      },
+      {
+        "iteration": 210,
+        "psnr_db": 14.815281219482422
+      },
+      {
+        "iteration": 211,
+        "psnr_db": 14.811749572753905
+      },
+      {
+        "iteration": 212,
+        "psnr_db": 14.808224792480468
+      },
+      {
+        "iteration": 213,
+        "psnr_db": 14.804708251953125
+      },
+      {
+        "iteration": 214,
+        "psnr_db": 14.801195373535156
+      },
+      {
+        "iteration": 215,
+        "psnr_db": 14.797686767578124
+      },
+      {
+        "iteration": 216,
+        "psnr_db": 14.794185028076171
+      },
+      {
+        "iteration": 217,
+        "psnr_db": 14.790686798095702
+      },
+      {
+        "iteration": 218,
+        "psnr_db": 14.787194366455077
+      },
+      {
+        "iteration": 219,
+        "psnr_db": 14.783707427978516
+      },
+      {
+        "iteration": 220,
+        "psnr_db": 14.78022705078125
+      },
+      {
+        "iteration": 221,
+        "psnr_db": 14.776753845214843
+      },
+      {
+        "iteration": 222,
+        "psnr_db": 14.773284606933593
+      },
+      {
+        "iteration": 223,
+        "psnr_db": 14.76982177734375
+      },
+      {
+        "iteration": 224,
+        "psnr_db": 14.766365814208985
+      },
+      {
+        "iteration": 225,
+        "psnr_db": 14.762913818359374
+      },
+      {
+        "iteration": 226,
+        "psnr_db": 14.759466400146485
+      },
+      {
+        "iteration": 227,
+        "psnr_db": 14.756022796630859
+      },
+      {
+        "iteration": 228,
+        "psnr_db": 14.752584533691406
+      },
+      {
+        "iteration": 229,
+        "psnr_db": 14.749149322509766
+      },
+      {
+        "iteration": 230,
+        "psnr_db": 14.745720367431641
+      },
+      {
+        "iteration": 231,
+        "psnr_db": 14.742296295166016
+      },
+      {
+        "iteration": 232,
+        "psnr_db": 14.738876495361328
+      },
+      {
+        "iteration": 233,
+        "psnr_db": 14.735459289550782
+      },
+      {
+        "iteration": 234,
+        "psnr_db": 14.732046203613281
+      },
+      {
+        "iteration": 235,
+        "psnr_db": 14.728638763427734
+      },
+      {
+        "iteration": 236,
+        "psnr_db": 14.725236053466796
+      },
+      {
+        "iteration": 237,
+        "psnr_db": 14.721838836669923
+      },
+      {
+        "iteration": 238,
+        "psnr_db": 14.718447418212891
+      },
+      {
+        "iteration": 239,
+        "psnr_db": 14.715061645507813
+      },
+      {
+        "iteration": 240,
+        "psnr_db": 14.711680297851563
+      },
+      {
+        "iteration": 241,
+        "psnr_db": 14.708304443359374
+      },
+      {
+        "iteration": 242,
+        "psnr_db": 14.70493423461914
+      },
+      {
+        "iteration": 243,
+        "psnr_db": 14.70156723022461
+      },
+      {
+        "iteration": 244,
+        "psnr_db": 14.698205261230468
+      },
+      {
+        "iteration": 245,
+        "psnr_db": 14.694846954345703
+      },
+      {
+        "iteration": 246,
+        "psnr_db": 14.691491241455077
+      },
+      {
+        "iteration": 247,
+        "psnr_db": 14.688140563964843
+      },
+      {
+        "iteration": 248,
+        "psnr_db": 14.68479217529297
+      },
+      {
+        "iteration": 249,
+        "psnr_db": 14.681449127197265
+      },
+      {
+        "iteration": 250,
+        "psnr_db": 14.67811264038086
+      },
+      {
+        "iteration": 251,
+        "psnr_db": 14.674779510498047
+      },
+      {
+        "iteration": 252,
+        "psnr_db": 14.6714501953125
+      },
+      {
+        "iteration": 253,
+        "psnr_db": 14.668124694824218
+      },
+      {
+        "iteration": 254,
+        "psnr_db": 14.664802703857422
+      },
+      {
+        "iteration": 255,
+        "psnr_db": 14.661484985351562
+      },
+      {
+        "iteration": 256,
+        "psnr_db": 14.65817352294922
+      },
+      {
+        "iteration": 257,
+        "psnr_db": 14.654865112304687
+      },
+      {
+        "iteration": 258,
+        "psnr_db": 14.65156280517578
+      },
+      {
+        "iteration": 259,
+        "psnr_db": 14.64826416015625
+      },
+      {
+        "iteration": 260,
+        "psnr_db": 14.644969940185547
+      },
+      {
+        "iteration": 261,
+        "psnr_db": 14.641681213378906
+      },
+      {
+        "iteration": 262,
+        "psnr_db": 14.63839584350586
+      },
+      {
+        "iteration": 263,
+        "psnr_db": 14.635114440917969
+      },
+      {
+        "iteration": 264,
+        "psnr_db": 14.631837158203124
+      },
+      {
+        "iteration": 265,
+        "psnr_db": 14.628564147949218
+      },
+      {
+        "iteration": 266,
+        "psnr_db": 14.62529541015625
+      },
+      {
+        "iteration": 267,
+        "psnr_db": 14.622032623291016
+      },
+      {
+        "iteration": 268,
+        "psnr_db": 14.61877426147461
+      },
+      {
+        "iteration": 269,
+        "psnr_db": 14.615520477294922
+      },
+      {
+        "iteration": 270,
+        "psnr_db": 14.612271270751954
+      },
+      {
+        "iteration": 271,
+        "psnr_db": 14.60902572631836
+      },
+      {
+        "iteration": 272,
+        "psnr_db": 14.605783233642578
+      },
+      {
+        "iteration": 273,
+        "psnr_db": 14.602544708251953
+      },
+      {
+        "iteration": 274,
+        "psnr_db": 14.599309997558594
+      },
+      {
+        "iteration": 275,
+        "psnr_db": 14.596079864501952
+      },
+      {
+        "iteration": 276,
+        "psnr_db": 14.59285385131836
+      },
+      {
+        "iteration": 277,
+        "psnr_db": 14.589632568359375
+      },
+      {
+        "iteration": 278,
+        "psnr_db": 14.586415710449218
+      },
+      {
+        "iteration": 279,
+        "psnr_db": 14.583203125
+      },
+      {
+        "iteration": 280,
+        "psnr_db": 14.579993286132812
+      },
+      {
+        "iteration": 281,
+        "psnr_db": 14.576785583496093
+      },
+      {
+        "iteration": 282,
+        "psnr_db": 14.573582916259765
+      },
+      {
+        "iteration": 283,
+        "psnr_db": 14.57038543701172
+      },
+      {
+        "iteration": 284,
+        "psnr_db": 14.567192993164063
+      },
+      {
+        "iteration": 285,
+        "psnr_db": 14.564006195068359
+      },
+      {
+        "iteration": 286,
+        "psnr_db": 14.560823974609375
+      },
+      {
+        "iteration": 287,
+        "psnr_db": 14.557645111083984
+      },
+      {
+        "iteration": 288,
+        "psnr_db": 14.554469757080078
+      },
+      {
+        "iteration": 289,
+        "psnr_db": 14.551298217773438
+      },
+      {
+        "iteration": 290,
+        "psnr_db": 14.548132019042969
+      },
+      {
+        "iteration": 291,
+        "psnr_db": 14.544969177246093
+      },
+      {
+        "iteration": 292,
+        "psnr_db": 14.541809387207032
+      },
+      {
+        "iteration": 293,
+        "psnr_db": 14.538651123046876
+      },
+      {
+        "iteration": 294,
+        "psnr_db": 14.535496215820313
+      },
+      {
+        "iteration": 295,
+        "psnr_db": 14.53234390258789
+      },
+      {
+        "iteration": 296,
+        "psnr_db": 14.529194488525391
+      },
+      {
+        "iteration": 297,
+        "psnr_db": 14.526047821044921
+      },
+      {
+        "iteration": 298,
+        "psnr_db": 14.522903594970703
+      },
+      {
+        "iteration": 299,
+        "psnr_db": 14.519762420654297
+      },
+      {
+        "iteration": 300,
+        "psnr_db": 14.516624908447266
+      }
+    ],
+    "selected_iteration": 6,
+    "val_psnr_db": 16.358369750976564
+  }
+}
