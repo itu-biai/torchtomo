@@ -146,6 +146,10 @@ two CUDA libraries spend under 10 MB. Before the rewrite the same call cost
 --lpd-width 32` ran out of memory above batch 2 on an 11 GB card. It now trains at
 batch 5, peaking at 9.30 GB.
 
+LEAP allocates outside PyTorch's caching allocator, so `max_memory_allocated`
+cannot see it. Both a torch-level and a driver-level figure are recorded in the
+JSON, and they agree closely here.
+
 Separately, the projector itself holds memory before any call is made. That was
 1511 MB of precomputed rotation grids at 512 px and 360 angles; it is now 271.6 MB
 of on-demand grids under a cache budget, and 3.1 MB with the cache disabled.
@@ -172,17 +176,13 @@ still pins the forward to 0.1% against LEAP.
 Two things that looked promising did not work. Computing the discrete adjoint
 directly as a bilinear scatter was exact but 3x slower than the VJP, because
 `scatter_add_` serialises on atomics. Raising the angle chunk bound bought 5% of
-forward time for 12x the peak memory. Both are written up in `.plans/drafts/`.
+forward time for 12x the peak memory.
 
 The remaining gap is structural: a rotate-and-sum forward touches every pixel for
 every angle, where a ray-driven CUDA kernel walks only the pixels a ray crosses.
 Closing it means writing that kernel, which is the thing torchtomo exists not to
 do. If you need LEAP's speed, `benchmark/leap_projector.py` is a drop-in
 `ParallelBeam` and `--projector leap` routes the whole benchmark through it.
-
-LEAP allocates outside PyTorch's caching allocator, so `max_memory_allocated`
-cannot see it. Both a torch-level and a driver-level figure are recorded in the
-JSON, and they agree closely here.
 
 ## What it costs the benchmark: ten methods on each backend
 
