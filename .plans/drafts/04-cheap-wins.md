@@ -6,6 +6,12 @@ dominating the profile.
 
 ## Retune the angle chunk size
 
+> **Status: tried, rejected.** Sweeping the target from `1 << 24` to `1 << 28` at
+> 512 px, 360 angles, batch 4 moved the forward from 20.90 ms to 19.85 ms, 5%, and
+> took peak memory from 175 MB to 2053 MB, 12x. The existing bound is right. Left
+> below for the reasoning, which was wrong about where the cost was.
+
+
 `BaseProjector._angle_chunk_size` caps a chunk at `1 << 24` work items on GPU,
 which at 512 px, batch 4 gives 16 angles and therefore 23 chunks and 23 kernel
 launches per call. That bound was chosen to keep the per-angle expansion in check.

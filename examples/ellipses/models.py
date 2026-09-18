@@ -144,7 +144,7 @@ class IRadonMap(nn.Module):
             end = min(start + chunk, projector.n_angles)
             count = end - start
             rows = filtered[:, :, start:end, :].permute(0, 2, 1, 3).reshape(batch * count, 1, 1, projector.n_det)
-            grid = projector.backward_grids[start:end]
+            grid = projector._backward_grid(start, end)
             grid = grid.unsqueeze(0).expand(batch, -1, -1, -1, -1).reshape(batch * count, size, size, 2)
             sampled = sample_bilinear(rows, grid).reshape(batch, count, size, size)
             image = image + (sampled * self.backprojection[start:end]).sum(dim=1, keepdim=True)

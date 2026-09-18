@@ -1,5 +1,17 @@
 # 02. Stop materialising the rotation grids
 
+> **Status: landed, with one correction.** Rebuilding the grid per call is faster
+> than reading it back at every geometry the benchmark covers except one: 256 px,
+> 180 angles, batch 1, where the whole geometry fits a single chunk and the rebuild
+> happens on every call with nothing to amortise it against. That regressed from
+> 0.58 ms to 1.35 ms. Fixed with a memory-budgeted cache, `grid_cache_bytes`,
+> defaulting to 256 MB: small geometries keep their grid, large ones rebuild. The
+> flag below is that flag, inverted. The default is on-demand and the budget is what
+> opts a geometry back into caching, rather than a boolean the caller has to know to
+> set. Resident memory at 512 px and 360 angles went from 1511 MB to 271.6 MB, and
+> to 3.1 MB with `grid_cache_bytes=0`. The cache is cleared in `_apply`, since a
+> grid belongs to the device and dtype it was built on.
+
 ## The problem
 
 `ParallelBeam.__init__` precomputes and registers two full sampling grids:

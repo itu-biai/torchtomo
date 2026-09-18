@@ -103,22 +103,30 @@ This matters for any method whose loss round-trips through `fbp()` and
 
 ## Speed
 
-Milliseconds per call and images per second, 512 px, batch 4.
+Milliseconds per call and images per second, 512 px, batch 4. The torchtomo
+column is after the projector rewrite described under "What the profile said"
+below; the numbers it replaced are in that section.
 
 | Operation | Angles | torchtomo | LEAP | torch-radon |
 | --- | --- | --- | --- | --- |
-| forward | 90 | 7.500 ms, 533/s | 1.187 ms, 3369/s | 0.231 ms, 17298/s |
-| backproject | 90 | 19.074 ms, 210/s | 0.669 ms, 5976/s | 0.166 ms, 24160/s |
-| fbp | 90 | 5.944 ms, 673/s | 3.601 ms, 1111/s | 0.223 ms, 17953/s |
-| forward | 360 | 29.938 ms, 134/s | 2.677 ms, 1494/s | 0.684 ms, 5844/s |
-| backproject | 360 | 76.830 ms, 52/s | 1.727 ms, 2316/s | 0.640 ms, 6253/s |
-| fbp | 360 | 23.579 ms, 170/s | 7.848 ms, 510/s | 0.895 ms, 4468/s |
+| forward | 90 | 3.287 ms, 1217/s | 1.129 ms, 3542/s | 0.227 ms, 17602/s |
+| backproject | 90 | 12.426 ms, 322/s | 0.620 ms, 6455/s | 0.163 ms, 24538/s |
+| fbp | 90 | 3.093 ms, 1293/s | 3.486 ms, 1147/s | 0.220 ms, 18202/s |
+| forward | 360 | 17.879 ms, 224/s | 2.599 ms, 1539/s | 0.674 ms, 5936/s |
+| backproject | 360 | 54.485 ms, 73/s | 1.661 ms, 2408/s | 0.630 ms, 6345/s |
+| fbp | 360 | 14.284 ms, 280/s | 7.659 ms, 522/s | 0.883 ms, 4532/s |
 
-torch-radon is fastest throughout, by 11x to 44x over torchtomo on projection and
-backprojection. LEAP sits between the two. The one place torchtomo wins is FBP at
-batch 1, where LEAP carries a fixed overhead of several milliseconds per call
+torch-radon is fastest throughout, by 7x to 86x over torchtomo on projection and
+backprojection. LEAP sits between the two, 2.9x to 33x ahead. The gap is widest on
+backprojection, where torchtomo pays for `adjoint()` differentiating a temporary
+graph rather than running a transpose kernel.
+
+torchtomo wins FBP at batch 1 up to 512 px with 90 angles (1.76 ms against LEAP's
+2.96 ms), because LEAP carries a fixed per-call overhead of a few milliseconds
 that does not shrink with the problem; part of that is the copy the adapter in
-`benchmark/leap_projector.py` makes before handing the sinogram over.
+`benchmark/leap_projector.py` makes before handing the sinogram over. At 512 px
+with 360 angles that overhead is amortised and LEAP takes the row, 5.20 ms against
+8.56 ms.
 
 ## GPU memory
 
@@ -126,15 +134,51 @@ Peak for a single call, 512 px, 360 angles, batch 4.
 
 | Operation | torchtomo | LEAP | torch-radon |
 | --- | ---: | ---: | ---: |
-| forward | 342.5 MB | 10.1 MB | 2.9 MB |
-| backproject | 4709.1 MB | 8.4 MB | 4.2 MB |
-| fbp | 275.7 MB | 10.1 MB | 41.3 MB |
+| forward | 174.7 MB | 10.9 MB | 2.9 MB |
+| backproject | 615.1 MB | 8.4 MB | 4.2 MB |
+| fbp | 174.9 MB | 10.9 MB | 43.7 MB |
 
-This is the widest gap of the four dimensions. torchtomo's `adjoint()` builds and
-differentiates a temporary forward graph on every call, which is what costs 4.7 GB
-where the two CUDA libraries spend under 10 MB. It is also the direct reason LPD
-at 512 with `--lpd-iterations 10 --lpd-width 32` runs out of memory above batch 2
-on an 11 GB card.
+This is still the widest gap of the four dimensions, though it is 7.7x narrower on
+backprojection than it was. torchtomo's `adjoint()` builds and differentiates a
+temporary forward graph on every call, which is what keeps it at 615 MB where the
+two CUDA libraries spend under 10 MB. Before the rewrite the same call cost
+4709 MB, and that was the direct reason LPD at 512 with `--lpd-iterations 10
+--lpd-width 32` ran out of memory above batch 2 on an 11 GB card. It now trains at
+batch 5, peaking at 9.30 GB.
+
+Separately, the projector itself holds memory before any call is made. That was
+1511 MB of precomputed rotation grids at 512 px and 360 angles; it is now 271.6 MB
+of on-demand grids under a cache budget, and 3.1 MB with the cache disabled.
+
+## What the profile said
+
+Most of the original gap was not the price of staying in pure PyTorch. At 512 px,
+360 angles, batch 4, more time went to `expand().reshape()` copying tensors
+(0.630 ms per chunk) than to `grid_sample` doing the work (0.485 ms). Removing
+that duplication and building the sampling grids on demand gave:
+
+| Operation | before | after | gain | peak before | peak after |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| forward | 29.94 ms | 17.88 ms | 1.67x | 342.5 MB | 174.7 MB |
+| backproject | 76.83 ms | 54.49 ms | 1.41x | 4709.1 MB | 615.1 MB |
+| fbp | 23.58 ms | 14.28 ms | 1.65x | 275.7 MB | 174.9 MB |
+
+Smaller geometries gain more, up to 2.44x on forward and 3.17x on FBP at 256 px
+with 90 angles. Every output is unchanged: CPU results are bitwise identical and
+CUDA differs by one ulp, `benchmark/benchmark_adjoint.py --pairs 500 --dtype
+float64` gives a residual of 3.6e-16, and `benchmark/test_leap_consistency.py`
+still pins the forward to 0.1% against LEAP.
+
+Two things that looked promising did not work. Computing the discrete adjoint
+directly as a bilinear scatter was exact but 3x slower than the VJP, because
+`scatter_add_` serialises on atomics. Raising the angle chunk bound bought 5% of
+forward time for 12x the peak memory. Both are written up in `.plans/drafts/`.
+
+The remaining gap is structural: a rotate-and-sum forward touches every pixel for
+every angle, where a ray-driven CUDA kernel walks only the pixels a ray crosses.
+Closing it means writing that kernel, which is the thing torchtomo exists not to
+do. If you need LEAP's speed, `benchmark/leap_projector.py` is a drop-in
+`ParallelBeam` and `--projector leap` routes the whole benchmark through it.
 
 LEAP allocates outside PyTorch's caching allocator, so `max_memory_allocated`
 cannot see it. Both a torch-level and a driver-level figure are recorded in the

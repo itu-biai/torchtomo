@@ -30,6 +30,7 @@ class ParallelBeam(BaseProjector):
         n_det: Optional[int] = None,
         angle_range: tuple[float, float] = (0, np.pi),
         circle: bool = True,
+        grid_cache_bytes: int = 256 << 20,
     ):
         """
         Initialize parallel beam projector.
@@ -40,6 +41,11 @@ class ParallelBeam(BaseProjector):
             n_det: Number of detector elements (default: img_size)
             angle_range: Range of angles in radians (default: 0 to pi)
             circle: If True, mask image to inscribed circle
+            grid_cache_bytes: How much of the per-angle sampling grids to keep.
+                Small geometries fit entirely and are then as fast as precomputing
+                them; large ones exceed the budget and are rebuilt per chunk, which
+                is what keeps a 512 px, 360 angle projector at megabytes instead of
+                the 1.5 GB the full grids would take. Set to 0 to always rebuild.
         """
         n_det = n_det or img_size
         super().__init__(img_size, n_angles, n_det, angle_range)
@@ -52,53 +58,78 @@ class ParallelBeam(BaseProjector):
         coords = torch.linspace(-1, 1, img_size)
         grid_y, grid_x = torch.meshgrid(coords, coords, indexing="ij")
 
-        # Precompute rotation grids for forward projection
-        self.register_buffer("forward_grids", self._precompute_forward_grids(grid_x, grid_y))
-        self.register_buffer("backward_grids", self._precompute_backward_grids(grid_x, grid_y))
+        # The per-angle sampling grids are two multiplies and an add away from these,
+        # and materialising them costs [n_angles, H, W, 2] floats twice over: 1.5 GB at
+        # 512 px and 360 angles. They are rebuilt per chunk instead.
+        self.register_buffer("grid_x", grid_x.contiguous())
+        self.register_buffer("grid_y", grid_y.contiguous())
+        self.grid_cache_bytes = grid_cache_bytes
+        self._grid_cache: dict = {}
+        self._grid_cache_used = 0
 
         # Circle mask for reconstruction
         if circle:
             mask = (grid_x**2 + grid_y**2 <= 1).float()
             self.register_buffer("circle_mask", mask)
 
-    def _precompute_forward_grids(self, grid_x: torch.Tensor, grid_y: torch.Tensor) -> torch.Tensor:
-        """Precompute sampling grids for forward projection."""
-        grids = []
+    def _cached_grid(self, kind: str, start: int, end: int, build) -> torch.Tensor:
+        """Reuse a chunk's grid when the budget allows, otherwise rebuild it.
 
-        for angle in self.angles:
-            grid = self._rotation_grid(angle, grid_x, grid_y)
-            grids.append(grid)
-
-        return torch.stack(grids)  # [n_angles, H, W, 2]
-
-    def _rotation_grid(self, angle: torch.Tensor, grid_x: torch.Tensor, grid_y: torch.Tensor) -> torch.Tensor:
-        """Create sampling grid for rotating image by angle."""
-        cos_a = torch.cos(angle)
-        sin_a = torch.sin(angle)
-
-        # Rotation matrix (rotate coordinates, not image)
-        x_rot = cos_a * grid_x + sin_a * grid_y
-        y_rot = -sin_a * grid_x + cos_a * grid_y
-
-        # Stack to grid format [H, W, 2]
-        grid = torch.stack([x_rot, y_rot], dim=-1)
-
+        The geometry never changes, so a cached chunk is always valid for the device
+        and dtype it was built on. Anything that does not fit is simply not cached,
+        which keeps the memory bounded by the budget rather than by the geometry.
+        """
+        key = (kind, start, end, self.grid_x.device, self.grid_x.dtype)
+        cached = self._grid_cache.get(key)
+        if cached is not None:
+            return cached
+        grid = build()
+        cost = grid.numel() * grid.element_size()
+        if self._grid_cache_used + cost <= self.grid_cache_bytes:
+            self._grid_cache[key] = grid
+            self._grid_cache_used += cost
         return grid
 
-    def _precompute_backward_grids(self, grid_x: torch.Tensor, grid_y: torch.Tensor) -> torch.Tensor:
-        """Precompute detector lookup grids for backprojection."""
-        grids = []
+    def _coordinate_pair(self, count: int) -> torch.Tensor:
+        """Scratch shaped [2, count, H, W], the two coordinate planes kept contiguous.
 
-        for angle in self.angles:
-            cos_a = torch.cos(angle)
-            sin_a = torch.sin(angle)
-            t = grid_x * cos_a - grid_y * sin_a
+        Building each plane in its own contiguous block and interleaving once at the
+        end is twice as fast as stacking expression results, which writes and reads
+        back a temporary per operation.
+        """
+        return torch.empty(2, count, self.img_size, self.img_size, device=self.grid_x.device, dtype=self.grid_x.dtype)
 
-            grid = torch.zeros(self.img_size, self.img_size, 2)
-            grid[..., 0] = t
-            grids.append(grid)
+    def _forward_grid(self, start: int, end: int) -> torch.Tensor:
+        """Rotation sampling grids for one chunk of angles, shape [count, H, W, 2]."""
+        return self._cached_grid("forward", start, end, lambda: self._build_forward_grid(start, end))
 
-        return torch.stack(grids)
+    def _build_forward_grid(self, start: int, end: int) -> torch.Tensor:
+        angles = self.angles[start:end].view(-1, 1, 1)
+        cos_a, sin_a = torch.cos(angles), torch.sin(angles)
+        planes = self._coordinate_pair(end - start)
+        torch.mul(self.grid_x, cos_a, out=planes[0])
+        planes[0].addcmul_(self.grid_y, sin_a)
+        torch.mul(self.grid_y, cos_a, out=planes[1])
+        planes[1].addcmul_(self.grid_x, -sin_a)
+        return planes.permute(1, 2, 3, 0).contiguous()
+
+    def _backward_grid(self, start: int, end: int) -> torch.Tensor:
+        """Detector lookup grids for one chunk of angles, shape [count, H, W, 2]."""
+        return self._cached_grid("backward", start, end, lambda: self._build_backward_grid(start, end))
+
+    def _build_backward_grid(self, start: int, end: int) -> torch.Tensor:
+        angles = self.angles[start:end].view(-1, 1, 1)
+        planes = self._coordinate_pair(end - start)
+        torch.mul(self.grid_x, torch.cos(angles), out=planes[0])
+        planes[0].addcmul_(self.grid_y, -torch.sin(angles))
+        planes[1].zero_()
+        return planes.permute(1, 2, 3, 0).contiguous()
+
+    def _apply(self, *args, **kwargs):
+        # A cached grid belongs to the device and dtype it was built on.
+        self._grid_cache = {}
+        self._grid_cache_used = 0
+        return super()._apply(*args, **kwargs)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -117,22 +148,22 @@ class ParallelBeam(BaseProjector):
             x = x * self.circle_mask.view(1, 1, self.img_size, self.img_size)
 
         projections = []
-        chunk_size = self._angle_chunk_size(B, self.img_size * self.img_size, x.device)
+        size = self.img_size
+        chunk_size = self._angle_chunk_size(B, size * size, x.device)
 
+        # The batch rides in the channel dimension and the angles are stacked along the
+        # sampled height, so one grid serves every image and the image is never copied.
+        # grid_sample applies the same grid to all channels, which is exactly what a
+        # geometry shared across a batch needs.
         for start in range(0, self.n_angles, chunk_size):
             end = min(start + chunk_size, self.n_angles)
             angle_count = end - start
-            grid = self.forward_grids[start:end]
-            grid = grid.unsqueeze(0).expand(B, -1, -1, -1, -1)
-            grid = grid.reshape(B * angle_count, self.img_size, self.img_size, 2)
-            batch = x.unsqueeze(1).expand(-1, angle_count, -1, -1, -1)
-            batch = batch.reshape(B * angle_count, 1, self.img_size, self.img_size)
+            grid = self._forward_grid(start, end).reshape(1, angle_count * size, size, 2)
 
-            rotated = sample_bilinear(batch, grid)
+            rotated = sample_bilinear(x.reshape(1, B, size, size), grid)
 
-            projection = rotated.sum(dim=2) * self.pixel_size
-            projection = projection.reshape(B, angle_count, 1, self.img_size)
-            projections.append(projection.permute(0, 2, 1, 3))
+            projection = rotated.view(B, angle_count, size, size).sum(dim=2) * self.pixel_size
+            projections.append(projection.unsqueeze(1))
 
         # Stack to sinogram [B, 1, n_angles, n_det]
         sinogram = torch.cat(projections, dim=2)
@@ -161,15 +192,15 @@ class ParallelBeam(BaseProjector):
             end = min(start + chunk_size, self.n_angles)
             angle_count = end - start
 
-            sino_rows = sinogram[:, :, start:end, :]
-            sino_rows = sino_rows.permute(0, 2, 1, 3).reshape(B * angle_count, 1, 1, self.n_det)
-            grid = self.backward_grids[start:end]
-            grid = grid.unsqueeze(0).expand(B, -1, -1, -1, -1)
-            grid = grid.reshape(B * angle_count, self.img_size, self.img_size, 2)
+            # Angles lead the batch here, because each angle samples its own detector
+            # row: that keeps one grid per angle instead of one per angle and image,
+            # and the only copy is the detector rows, which are tiny beside the grids.
+            sino_rows = sinogram[:, :, start:end, :].reshape(B, angle_count, self.n_det)
+            sino_rows = sino_rows.permute(1, 0, 2).reshape(angle_count, B, 1, self.n_det)
+            grid = self._backward_grid(start, end)
 
             contribution = sample_bilinear(sino_rows, grid)
-            contribution = contribution.reshape(B, angle_count, 1, self.img_size, self.img_size)
-            recon += contribution.sum(dim=1)
+            recon += contribution.sum(dim=0).unsqueeze(1)
 
         # Normalize by angular spacing (delta_theta)
         recon = recon * self.angle_step

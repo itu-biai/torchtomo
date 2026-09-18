@@ -1,5 +1,14 @@
 # 03. Compute the discrete adjoint directly instead of differentiating a graph
 
+> **Status: implemented, verified correct, reverted.** The scatter was exact, with
+> the inner product identity holding to machine precision in float64, gradcheck and
+> gradgradcheck passing. It was **3x slower**: 221.6 ms against the 75.7 ms baseline
+> and against 56.8 ms for the VJP once drafts 01 and 02 landed. `scatter_add_`
+> atomic contention is far worse than the 2x to 3x penalty assumed below. It did cut
+> peak memory to 603 MB, but the VJP reaches 615 MB anyway once the grids shrink, so
+> the scatter won on neither axis. Do not retry without a plan for the contention,
+> for example sorting by destination voxel or accumulating per angle subset.
+
 ## The problem
 
 `_DiscreteAdjoint.forward` in `src/torchtomo/base.py` gets `A^T y` by building a
