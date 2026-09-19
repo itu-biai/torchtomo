@@ -81,7 +81,16 @@ class FanBeam(BaseProjector):
         self._src_dist_norm = src_dist * self.scale
         self._det_dist_norm = det_dist * self.scale
         self._det_width_norm = self.det_width * self.scale
+        self._set_geometry_buffers()
 
+    def _apply(self, fn, *args, **kwargs):
+        result = super()._apply(fn, *args, **kwargs)
+        self._set_geometry_buffers()
+        return result
+
+    def _set_geometry_buffers(self) -> None:
+        """Rebuild ray and backprojection grids in the current angles dtype."""
+        dtype, device = self.angles.dtype, self.angles.device
         ray_grids, ray_lengths = self._precompute_ray_grids()
         self.register_buffer("ray_grids", ray_grids)
         self.register_buffer("ray_lengths", ray_lengths)
@@ -90,15 +99,17 @@ class FanBeam(BaseProjector):
         self.register_buffer("backward_grids", back_grids)
         self.register_buffer("backward_weights", weights)
 
-        det_pos = torch.linspace(-self._det_width_norm / 2, self._det_width_norm / 2, n_det)
+        det_pos = torch.linspace(
+            -self._det_width_norm / 2, self._det_width_norm / 2, self.n_det, dtype=dtype, device=device
+        )
         D = self._src_dist_norm + self._det_dist_norm
         cos_weight = D / torch.sqrt(D**2 + det_pos**2)
         self.register_buffer("cos_weight", cos_weight)
 
-        if circle:
-            coords = torch.linspace(-1, 1, img_size)
+        if self.circle:
+            coords = torch.linspace(-1, 1, self.img_size, dtype=dtype, device=device)
             y, x = torch.meshgrid(coords, coords, indexing="ij")
-            mask = (x**2 + y**2 <= 1).float()
+            mask = (x**2 + y**2 <= 1).to(dtype=dtype)
             self.register_buffer("circle_mask", mask)
 
     def _precompute_ray_grids(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -142,7 +153,13 @@ class FanBeam(BaseProjector):
         det_dir_x = cos_a
         det_dir_y = sin_a
 
-        det_offsets = torch.linspace(-self._det_width_norm / 2, self._det_width_norm / 2, self.n_det)
+        det_offsets = torch.linspace(
+            -self._det_width_norm / 2,
+            self._det_width_norm / 2,
+            self.n_det,
+            dtype=angle.dtype,
+            device=angle.device,
+        )
 
         det_x = det_cx + det_offsets * det_dir_x
         det_y = det_cy + det_offsets * det_dir_y
@@ -169,7 +186,7 @@ class FanBeam(BaseProjector):
 
         ray_lengths = t_exit - t_entry
 
-        t_samples = torch.linspace(0, 1, self.n_samples).view(1, -1)
+        t_samples = torch.linspace(0, 1, self.n_samples, dtype=angle.dtype, device=angle.device).view(1, -1)
         t_actual = t_entry.view(-1, 1) + t_samples * (t_exit - t_entry).view(-1, 1)
 
         ray_x = src_x + t_actual * dir_x.view(-1, 1)
@@ -190,7 +207,7 @@ class FanBeam(BaseProjector):
         grids = []
         weights = []
 
-        coords = torch.linspace(-1, 1, self.img_size)
+        coords = torch.linspace(-1, 1, self.img_size, dtype=self.angles.dtype, device=self.angles.device)
         grid_y, grid_x = torch.meshgrid(coords, coords, indexing="ij")
 
         for angle in self.angles:
@@ -245,7 +262,7 @@ class FanBeam(BaseProjector):
 
         det_normalized = det_offset / (self._det_width_norm / 2)
 
-        grid = torch.zeros(self.img_size, self.img_size, 2)
+        grid = torch.zeros(self.img_size, self.img_size, 2, dtype=grid_x.dtype, device=grid_x.device)
         grid[..., 0] = det_normalized
         grid[..., 1] = 0
 

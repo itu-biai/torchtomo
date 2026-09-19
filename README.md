@@ -104,17 +104,25 @@ on the old `backward()` values should use `backproject()` to preserve those valu
 LPD code can continue to use `forward()`/`backward()` as a matched pair; existing
 models may need retraining or step-size retuning after the operator change.
 
-The adjoint evaluates a temporary forward vector-Jacobian product (VJP), then
-uses the explicit training gradient $g \mapsto A g$. This avoids requiring
-second derivatives of `grid_sample`, which are unavailable in some PyTorch
-versions. It supports `torch.no_grad()` and `torch.inference_mode()` evaluation.
+The adjoint calls `grid_sample`'s input backward kernel directly on CPU and
+CUDA for parallel beam, then uses the explicit training gradient $g \mapsto A g$.
+That avoids both a throwaway forward and second derivatives of `grid_sample`,
+which are unavailable in some PyTorch versions. Fan-beam, MPS, and PyTorch
+builds before 1.11 (where `output_mask` was added) fall back to a temporary
+forward VJP. Both paths support `torch.no_grad()` and `torch.inference_mode()`.
 On MPS, bilinear sampling uses differentiable `gather` operations because some
 PyTorch versions also lack the first backward derivative of `grid_sample` on
 that device. Computation stays on MPS without requiring CPU fallback.
 Geometry is fixed and must not change between evaluation and backpropagation;
 geometry gradients are not supported. Match projector and input device/dtype.
-The temporary forward graph can use more memory and time than the analytical
-backprojection; profile representative LPD batch sizes before large runs.
+
+`ParallelBeam(..., grid_cache_bytes=...)` bounds how much of the per-angle
+sampling grids stay resident. The default 256 MB holds a 512 px, 90 angle
+forward grid (189 MB) and keeps a 512 px, 360 angle projector in the hundreds
+of megabytes instead of 1.5 GB, at the cost of rebuilding about two thirds of
+those grids on every call. Raise the budget above the grid size if the memory
+is free; leaving the default protects LPD headroom on an 11 GB card. Set it to
+0 to always rebuild.
 
 For adjoint diagnostics, prefer float64 and report an aggregate residual as well
 as per-pair relative errors: near-zero inner products can make the latter large

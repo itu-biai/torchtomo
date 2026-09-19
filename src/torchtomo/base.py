@@ -5,6 +5,32 @@ from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
 
+from ._sampling import grid_sample_input_backward_supported
+
+
+def _vjp_adjoint(projector: "BaseProjector", sinogram: torch.Tensor) -> torch.Tensor:
+    """A^T y by differentiating a throwaway forward. Fallback and test reference."""
+    with torch.inference_mode(False), torch.enable_grad():
+        image = torch.zeros(
+            sinogram.shape[0],
+            1,
+            projector.img_size,
+            projector.img_size,
+            device=sinogram.device,
+            dtype=sinogram.dtype,
+            requires_grad=True,
+        )
+        projection = projector.forward(image)
+        return torch.autograd.grad(projection, image, sinogram, create_graph=False)[0]
+
+
+def _adjoint_image(projector: "BaseProjector", sinogram: torch.Tensor) -> torch.Tensor:
+    """A^T y: the projector's direct kernel when it has one, otherwise the VJP."""
+    direct = getattr(projector, "_direct_adjoint", None)
+    if direct is not None and grid_sample_input_backward_supported(sinogram.device):
+        return direct(sinogram)
+    return _vjp_adjoint(projector, sinogram)
+
 
 class _DiscreteAdjoint(torch.autograd.Function):
     """Transpose a fixed linear projector without differentiating a VJP twice."""
@@ -12,20 +38,9 @@ class _DiscreteAdjoint(torch.autograd.Function):
     @staticmethod
     def forward(ctx, sinogram: torch.Tensor, projector: "BaseProjector") -> torch.Tensor:
         ctx.projector = projector
-        # The VJP is needed even during evaluation under no_grad/inference_mode.
-        # Its temporary graph is freed here; training uses the explicit rule below.
-        with torch.inference_mode(False), torch.enable_grad():
-            image = torch.zeros(
-                sinogram.shape[0],
-                1,
-                projector.img_size,
-                projector.img_size,
-                device=sinogram.device,
-                dtype=sinogram.dtype,
-                requires_grad=True,
-            )
-            projection = projector.forward(image)
-            return torch.autograd.grad(projection, image, sinogram, create_graph=False)[0]
+        # Evaluation under no_grad/inference_mode still needs A^T. The direct kernel
+        # never builds a graph; the VJP fallback re-enables grad inside itself.
+        return _adjoint_image(projector, sinogram)
 
     @staticmethod
     def backward(ctx, grad_image: torch.Tensor):
@@ -60,8 +75,21 @@ class BaseProjector(nn.Module, ABC):
         self.n_det = n_det
         self.angle_range = angle_range
         self.angle_step = (angle_range[1] - angle_range[0]) / n_angles
-        angles = torch.linspace(angle_range[0], angle_range[1], n_angles, dtype=torch.float32)
+        self._set_angle_buffer(torch.device("cpu"), torch.float32)
+
+    def _set_angle_buffer(self, device: torch.device, dtype: torch.dtype) -> None:
+        """Rebuild angles in the requested dtype from the original range.
+
+        linspace is run in `dtype`, so a float64 projector is not a promoted
+        float32 grid. float32 construction is unchanged.
+        """
+        angles = torch.linspace(self.angle_range[0], self.angle_range[1], self.n_angles, dtype=dtype, device=device)
         self.register_buffer("angles", angles)
+
+    def _apply(self, fn, *args, **kwargs):
+        result = super()._apply(fn, *args, **kwargs)
+        self._set_angle_buffer(self.angles.device, self.angles.dtype)
+        return result
 
     def _angle_chunk_size(self, batch_size: int, work_items: int, device: torch.device) -> int:
         """Bound per-call tensor expansion while still batching angles."""
@@ -87,10 +115,10 @@ class BaseProjector(nn.Module, ABC):
         """
         Exact discrete adjoint of forward() for Euclidean tensor inner products.
 
-        For fixed, real, linear geometry, computes A^T y from the forward VJP,
-        including its interpolation, integration weights, and circle mask.
-        No angular normalization or FBP weighting is added. Equality of inner
-        products holds up to floating-point roundoff.
+        For fixed, real, linear geometry, computes A^T y including interpolation,
+        integration weights, and circle mask. No angular normalization or FBP
+        weighting is added. Equality of inner products holds up to floating-point
+        roundoff.
 
         Differentiable with respect to sinogram, with backward gradient A g,
         so this operator can be used inside Learned Primal-Dual networks.
@@ -98,9 +126,9 @@ class BaseProjector(nn.Module, ABC):
         gradients with respect to geometry are not supported. Projector buffers
         must have the same device and dtype as sinogram, as for forward().
 
-        This reference implementation builds and differentiates a temporary
-        forward graph on each call, which can cost more memory and time than
-        backproject(). It also works under no_grad() and inference_mode().
+        Parallel beam on CPU and CUDA calls grid_sample's input backward kernel
+        directly. Other geometries, MPS, and older PyTorch builds fall back to a
+        throwaway forward VJP. Both paths work under no_grad() and inference_mode().
 
         Args:
             sinogram: Sinogram of shape [B, 1, n_angles, n_det]

@@ -249,6 +249,10 @@ def train_model(name, model, objective, data, args, output, epochs, seed, learni
         first_epoch = checkpoint["epoch"] + 1
         previous_seconds = checkpoint["training_seconds"]
         LOGGER.info("model=%s resuming_at_epoch=%d", name, first_epoch)
+    peak_memory_bytes = None
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+        torch.cuda.reset_peak_memory_stats(device)
     start = time.perf_counter()
     for epoch in range(first_epoch, epochs + 1):
         epoch_start = time.perf_counter()
@@ -340,8 +344,19 @@ def train_model(name, model, objective, data, args, output, epochs, seed, learni
     checkpoint = torch.load(output / f"{name}-best.pt", map_location=device)
     load_weights(model, checkpoint["state_dict"])
     duration = previous_seconds + time.perf_counter() - start
-    LOGGER.info("model=%s training_complete seconds=%.2f best_epoch=%d", name, duration, best_epoch)
-    return {
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+        peak_memory_bytes = torch.cuda.max_memory_allocated(device)
+        LOGGER.info(
+            "model=%s training_complete seconds=%.2f best_epoch=%d peak_memory_bytes=%d",
+            name,
+            duration,
+            best_epoch,
+            peak_memory_bytes,
+        )
+    else:
+        LOGGER.info("model=%s training_complete seconds=%.2f best_epoch=%d", name, duration, best_epoch)
+    summary = {
         "parameters": parameter_count,
         "best_epoch": best_epoch,
         "epochs": epochs,
@@ -349,6 +364,9 @@ def train_model(name, model, objective, data, args, output, epochs, seed, learni
         "supervised": objective.uses_truth,
         "criterion": objective.criterion,
     }
+    if peak_memory_bytes is not None:
+        summary["peak_memory_bytes"] = peak_memory_bytes
+    return summary
 
 
 def save_plots(output, data, reconstructions, metrics, supervision, tile=256):

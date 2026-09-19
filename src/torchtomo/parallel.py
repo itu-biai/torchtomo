@@ -5,7 +5,7 @@ from typing import Optional
 import numpy as np
 import torch
 
-from ._sampling import sample_bilinear
+from ._sampling import grid_sample_input_backward, sample_bilinear
 from .base import BaseProjector
 from .filters import FilterType, apply_filter
 
@@ -46,6 +46,12 @@ class ParallelBeam(BaseProjector):
                 them; large ones exceed the budget and are rebuilt per chunk, which
                 is what keeps a 512 px, 360 angle projector at megabytes instead of
                 the 1.5 GB the full grids would take. Set to 0 to always rebuild.
+                The default 256 MB covers 512 px with 90 angles (189 MB of forward
+                grids) but not 512 px with 360 (755 MB), where about two thirds are
+                rebuilt on every call and grid building is about 35% of forward
+                time. Raise the budget above the grid size if that memory is free;
+                do not raise the default, it comes out of LPD's headroom on an
+                11 GB card.
         """
         n_det = n_det or img_size
         super().__init__(img_size, n_angles, n_det, angle_range)
@@ -55,21 +61,22 @@ class ParallelBeam(BaseProjector):
         # Pixel size (assuming image spans [-1, 1])
         self.pixel_size = 2.0 / img_size
 
-        coords = torch.linspace(-1, 1, img_size)
-        grid_y, grid_x = torch.meshgrid(coords, coords, indexing="ij")
-
         # The per-angle sampling grids are two multiplies and an add away from these,
         # and materialising them costs [n_angles, H, W, 2] floats twice over: 1.5 GB at
         # 512 px and 360 angles. They are rebuilt per chunk instead.
-        self.register_buffer("grid_x", grid_x.contiguous())
-        self.register_buffer("grid_y", grid_y.contiguous())
         self.grid_cache_bytes = grid_cache_bytes
         self._grid_cache: dict = {}
         self._grid_cache_used = 0
+        self._set_coordinate_buffers(self.angles.device, self.angles.dtype)
 
-        # Circle mask for reconstruction
-        if circle:
-            mask = (grid_x**2 + grid_y**2 <= 1).float()
+    def _set_coordinate_buffers(self, device: torch.device, dtype: torch.dtype) -> None:
+        """Rebuild the base lattice in `dtype` so `.double()` is not a float32 cast."""
+        coords = torch.linspace(-1, 1, self.img_size, dtype=dtype, device=device)
+        grid_y, grid_x = torch.meshgrid(coords, coords, indexing="ij")
+        self.register_buffer("grid_x", grid_x.contiguous())
+        self.register_buffer("grid_y", grid_y.contiguous())
+        if self.circle:
+            mask = (grid_x**2 + grid_y**2 <= 1).to(dtype=dtype)
             self.register_buffer("circle_mask", mask)
 
     def _cached_grid(self, kind: str, start: int, end: int, build) -> torch.Tensor:
@@ -125,11 +132,40 @@ class ParallelBeam(BaseProjector):
         planes[1].zero_()
         return planes.permute(1, 2, 3, 0).contiguous()
 
-    def _apply(self, *args, **kwargs):
+    def _apply(self, fn, *args, **kwargs):
         # A cached grid belongs to the device and dtype it was built on.
         self._grid_cache = {}
         self._grid_cache_used = 0
-        return super()._apply(*args, **kwargs)
+        result = super()._apply(fn, *args, **kwargs)
+        self._set_coordinate_buffers(self.angles.device, self.angles.dtype)
+        return result
+
+    def _direct_adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
+        """A^T y by calling grid_sample's input backward, skipping a throwaway forward.
+
+        Same kernel autograd would call, with the grid gradient masked off. The
+        operator is linear, so the image gradient does not depend on the image.
+        """
+        batch = sinogram.shape[0]
+        size = self.img_size
+        chunk = self._angle_chunk_size(batch, size * size, sinogram.device)
+        out = torch.zeros(1, batch, size, size, device=sinogram.device, dtype=sinogram.dtype)
+        shape_only = torch.empty(1, batch, size, size, device=sinogram.device, dtype=sinogram.dtype)
+        for start in range(0, self.n_angles, chunk):
+            end = min(start + chunk, self.n_angles)
+            angle_count = end - start
+            # Ray samples on H, angles along W: the ray-sum adjoint is a stride-0
+            # broadcast. The cached grid is angle-major (the fast forward layout),
+            # so the permute copies one chunk.
+            grid = self._forward_grid(start, end).permute(1, 0, 2, 3).contiguous()
+            grid = grid.reshape(1, size, angle_count * size, 2)
+            grad = (sinogram[:, 0, start:end, :] * self.pixel_size).reshape(batch, 1, angle_count * size)
+            grad = grad.expand(batch, size, angle_count * size).unsqueeze(0)
+            out += grid_sample_input_backward(grad, shape_only, grid)
+        out = out.view(batch, 1, size, size)
+        if self.circle:
+            out = out * self.circle_mask.view(1, 1, size, size)
+        return out
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

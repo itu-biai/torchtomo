@@ -156,6 +156,87 @@ def test_fbp_uses_analytical_backprojection(geometry, monkeypatch):
         assert grad.norm() > 0
 
 
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_direct_adjoint_matches_vjp(device):
+    """Shipped adjoint/backward match the VJP fallback, including a non-contiguous sinogram."""
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    from torchtomo.base import _vjp_adjoint
+
+    torch.manual_seed(21)
+    projector = ParallelBeam(img_size=16, n_angles=11, angle_range=(0.13, 2.71), circle=True).double().to(device)
+    y = torch.randn(3, 1, projector.n_angles, projector.n_det, dtype=torch.float64, device=device)
+    y = y.transpose(-1, -2).contiguous().transpose(-1, -2)
+    expected = _vjp_adjoint(projector, y)
+    actual = projector.adjoint(y)
+    torch.testing.assert_close(actual, expected)
+    torch.testing.assert_close(projector.backward(y), actual)
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_adjoint_calls_direct_kernel(device, monkeypatch):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    import torchtomo.parallel as parallel_mod
+
+    calls = {"n": 0}
+    original = parallel_mod.grid_sample_input_backward
+
+    def wrapped(*args, **kwargs):
+        calls["n"] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(parallel_mod, "grid_sample_input_backward", wrapped)
+    projector = ParallelBeam(img_size=8, n_angles=6, circle=False).to(device)
+    y = torch.randn(2, 1, projector.n_angles, projector.n_det, device=device)
+    projector.adjoint(y)
+    assert calls["n"] > 0
+
+
+def test_vjp_fallback_when_kernel_is_missing(monkeypatch):
+    import torchtomo.base as base_mod
+    from torchtomo.base import _vjp_adjoint
+
+    monkeypatch.setattr(base_mod, "grid_sample_input_backward_supported", lambda device: False)
+    torch.manual_seed(22)
+    projector = ParallelBeam(img_size=8, n_angles=5, circle=False).double()
+    y = torch.randn(2, 1, projector.n_angles, projector.n_det, dtype=torch.float64)
+    torch.testing.assert_close(projector.adjoint(y), _vjp_adjoint(projector, y))
+
+
+def test_fanbeam_adjoint_keeps_the_vjp(monkeypatch):
+    import torchtomo.parallel as parallel_mod
+
+    calls = {"n": 0}
+    original = parallel_mod.grid_sample_input_backward
+
+    def wrapped(*args, **kwargs):
+        calls["n"] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(parallel_mod, "grid_sample_input_backward", wrapped)
+    projector = _projector("fan", size=5)
+    y = torch.randn(1, 1, projector.n_angles, projector.n_det)
+    projector.adjoint(y)
+    assert calls["n"] == 0
+
+
+def test_float64_coordinates_are_rebuilt_not_promoted():
+    size, n_angles = 8, 7
+    angle_range = (0.13, 2.71)
+    projector = ParallelBeam(img_size=size, n_angles=n_angles, angle_range=angle_range)
+    expected32 = torch.linspace(*angle_range, n_angles, dtype=torch.float32)
+    torch.testing.assert_close(projector.angles, expected32, atol=0, rtol=0)
+
+    projector64 = projector.double()
+    expected64 = torch.linspace(*angle_range, n_angles, dtype=torch.float64)
+    torch.testing.assert_close(projector64.angles, expected64, atol=0, rtol=0)
+    coords = torch.linspace(-1, 1, size, dtype=torch.float64)
+    grid_y, grid_x = torch.meshgrid(coords, coords, indexing="ij")
+    torch.testing.assert_close(projector64.grid_x, grid_x, atol=0, rtol=0)
+    torch.testing.assert_close(projector64.grid_y, grid_y, atol=0, rtol=0)
+
+
 @pytest.mark.parametrize("geometry", ["parallel", "fan"])
 @pytest.mark.parametrize("device", ["cuda", "mps"])
 def test_accelerator_adjoint_and_training(geometry, device):
