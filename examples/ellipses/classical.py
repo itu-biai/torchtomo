@@ -64,13 +64,21 @@ def subset_projectors(projector, count):
         indices = torch.arange(offset, projector.n_angles, count)
         chosen = projector.angles[indices]
         # type(projector), not ParallelBeam, so a run on another backend keeps it.
-        subset = type(projector)(
+        kwargs = dict(
             img_size=projector.img_size,
             n_angles=len(chosen),
             n_det=projector.n_det,
             circle=projector.circle,
             angles=chosen,
-        ).to(projector.angles.device)
+        )
+        if hasattr(projector, "src_dist"):
+            kwargs.update(
+                src_dist=projector.src_dist,
+                det_dist=projector.det_dist,
+                det_width=projector.det_width,
+                n_samples=projector.n_samples,
+            )
+        subset = type(projector)(**kwargs).to(projector.angles.device)
         if not torch.allclose(subset.angles, chosen, atol=1e-5):
             raise ValueError("angle subset is not evenly spaced; SART needs a uniform angle grid")
         subset.angle_step = projector.angle_step * projector.n_angles / len(chosen)

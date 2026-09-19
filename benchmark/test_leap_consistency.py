@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import torch
 
-from torchtomo import ParallelBeam, shepp_logan
+from torchtomo import FanBeam, ParallelBeam, shepp_logan
 
 try:
     from leapctype import tomographicModels
@@ -106,3 +106,18 @@ def test_fbp_quality_matches_leap(n_angles):
     assert abs(ours - theirs) < 1.0, (
         f"FBP PSNR gap {abs(ours - theirs):.2f} dB (torchtomo={ours:.2f}, leap={theirs:.2f})"
     )
+
+
+@requires_leap
+def test_fan_adapter_forward_matches_torchtomo():
+    """LeapFanBeam is a drop-in: same image, same sinogram, no fitted scale."""
+    try:
+        from leap_projector import LeapFanBeam
+    except ImportError:
+        pytest.skip("leap_projector is not importable; put benchmark/ on PYTHONPATH")
+
+    size = 256
+    ours = FanBeam(img_size=size, n_angles=90).to("cuda")
+    leap = LeapFanBeam(img_size=size, n_angles=90, angles=ours.angles.cpu()).to("cuda")
+    truth = shepp_logan(size).reshape(1, 1, size, size).cuda() * ours.circle_mask
+    assert _relative_l2(ours.forward(truth), leap.forward(truth)) < 0.02

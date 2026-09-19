@@ -108,7 +108,15 @@ def ramp_filter_matrix(projector, filter_name="ramp"):
 
     identity = torch.eye(projector.n_det).view(projector.n_det, 1, 1, projector.n_det)
     columns = apply_filter(identity, filter_name).view(projector.n_det, projector.n_det)
-    return columns.t().contiguous() * (projector.img_size / 2)
+    scale = projector.img_size / 2
+    if hasattr(projector, "src_dist"):
+        mag = (projector.src_dist + projector.det_dist) / projector.src_dist
+        virt_px = projector.det_width / projector.n_det / mag
+        scale = scale / virt_px
+    matrix = columns.t().contiguous() * scale
+    if hasattr(projector, "cos_weight"):
+        matrix = matrix * projector.cos_weight.detach().to(device=matrix.device, dtype=matrix.dtype)
+    return matrix
 
 
 class IRadonMap(nn.Module):
@@ -116,20 +124,26 @@ class IRadonMap(nn.Module):
 
     Follows He et al., Radon Inversion via Deep Learning (IEEE TMI 2020). The
     fully connected filtering layer maps each view's detector vector through a
-    shared dense matrix, replacing the ramp filter. The sinusoidal
-    back-projection layer keeps the geometry's sinusoid for every pixel but
-    gives each pixel and view its own weight, which is far cheaper than a dense
-    layer and is what makes the architecture usable at 512 x 512.
+    shared dense matrix, replacing the ramp filter. The back-projection layer
+    keeps the geometry's detector lookup for every pixel but gives each pixel
+    and view its own weight, which is far cheaper than a dense layer and is
+    what makes the architecture usable at 512 x 512.
 
     Both layers start at the analytic reconstruction, so the untrained network
-    reproduces fbp() and training begins from there.
+    reproduces fbp() and training begins from there. Fan beam bakes in the
+    cosine pre-weight and the 1/U^2 backprojection weights.
     """
 
     def __init__(self, projector, width=16, filter_name="ramp"):
         super().__init__()
         self.projector = projector
         self.filtering = nn.Parameter(ramp_filter_matrix(projector, filter_name))
-        weights = torch.full((projector.n_angles, projector.img_size, projector.img_size), float(projector.angle_step))
+        if hasattr(projector, "backward_weights"):
+            weights = projector.backward_weights.detach() * (float(projector.angle_step) / 2)
+        else:
+            weights = torch.full(
+                (projector.n_angles, projector.img_size, projector.img_size), float(projector.angle_step)
+            )
         self.backprojection = nn.Parameter(weights)
         self.refine = FBPUNet(projector.circle_mask, width=width)
 

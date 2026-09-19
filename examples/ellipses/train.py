@@ -31,7 +31,7 @@ from models import FBPUNet, IRadonMap, LearnedPrimalDual, estimate_operator_norm
 from objectives import Noise2Inverse, Proj2Proj, Supervised
 from torch.nn import functional as F
 
-from torchtomo import ParallelBeam
+from torchtomo import FanBeam, ParallelBeam
 
 LOGGER = logging.getLogger("ellipses")
 
@@ -111,8 +111,22 @@ def build_projector(args):
     """The geometry, from whichever backend the run asked for.
 
     LEAP is an optional benchmark dependency, so it is imported only when chosen;
-    an ordinary run never touches it.
+    an ordinary run never touches it. Fan beam uses the size-aware FanBeam defaults
+    (src = det = 2 * img_size, 1.5 bins per pixel at the isocentre) unless overridden.
     """
+    if getattr(args, "geometry", "parallel") == "fan":
+        kwargs = dict(img_size=args.image_size, n_angles=args.angles)
+        if args.src_dist is not None:
+            kwargs["src_dist"] = args.src_dist
+        if args.det_dist is not None:
+            kwargs["det_dist"] = args.det_dist
+        if args.n_det is not None:
+            kwargs["n_det"] = args.n_det
+        if args.projector == "leap":
+            from leap_projector import LeapFanBeam
+
+            return LeapFanBeam(**kwargs)
+        return FanBeam(**kwargs)
     if args.projector == "leap":
         from leap_projector import LeapParallelBeam
 
@@ -569,6 +583,17 @@ def main():
         help="Which projector kernels to run on; leap needs benchmark/ on PYTHONPATH and LEAP installed",
     )
     parser.add_argument(
+        "--geometry",
+        choices=("parallel", "fan"),
+        default="parallel",
+        help="Beam geometry; fan uses FanBeam size-aware defaults unless --src-dist / --det-dist / --n-det are set",
+    )
+    parser.add_argument("--src-dist", type=float, default=None, help="Fan-beam source-to-isocentre distance in pixels")
+    parser.add_argument(
+        "--det-dist", type=float, default=None, help="Fan-beam isocentre-to-detector distance in pixels"
+    )
+    parser.add_argument("--n-det", type=int, default=None, help="Fan-beam detector bins")
+    parser.add_argument(
         "--resume", action="store_true", help="Resume saved data, weights, optimizer, and epoch schedule"
     )
     parser.add_argument(
@@ -647,6 +672,10 @@ def main():
             "p2p_grid",
             "models",
             "projector",
+            "geometry",
+            "src_dist",
+            "det_dist",
+            "n_det",
         ):
             if key in config:
                 setattr(args, key, config[key])
@@ -677,9 +706,10 @@ def main():
     torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
     LOGGER.info(
-        "run device=%s torch=%s image_size=%d angles=%d seed=%d",
+        "run device=%s torch=%s geometry=%s image_size=%d angles=%d seed=%d",
         args.device,
         torch.__version__,
+        getattr(args, "geometry", "parallel"),
         args.image_size,
         args.angles,
         args.seed,

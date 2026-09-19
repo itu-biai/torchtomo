@@ -1,4 +1,4 @@
-"""Compare torchtomo, LEAP, and torch-radon on the same parallel-beam problem.
+"""Compare torchtomo, LEAP, and torch-radon on the same parallel- or fan-beam problem.
 
 Four dimensions: reconstruction quality (PSNR and SSIM against the phantom),
 agreement between the libraries' sinograms, speed, and GPU memory footprint.
@@ -24,7 +24,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
-from torchtomo import ParallelBeam, shepp_logan
+from torchtomo import FanBeam, ParallelBeam, shepp_logan
 from torchtomo.phantom import circle_phantom
 
 # torch-radon 1.0 predates two removals it depends on: np.int, and torch.rfft.
@@ -34,14 +34,16 @@ if not hasattr(np, "int"):
     np.int = int
 
 try:
-    from torch_radon import Radon
+    from torch_radon import Radon, RadonFanbeam
 except ImportError:
     Radon = None
+    RadonFanbeam = None
 
 try:
-    from leap_projector import LeapParallelBeam
+    from leap_projector import LeapFanBeam, LeapParallelBeam
 except ImportError:
     LeapParallelBeam = None
+    LeapFanBeam = None
 
 try:
     from skimage.metrics import structural_similarity
@@ -131,13 +133,87 @@ class TorchRadonBackend:
         return self.radon.backprojection(self.filter_sinogram(sinogram))
 
 
-def available_backends():
+class TorchtomoFanBackend:
+    name = "torchtomo"
+
+    def __init__(self, size, angles, device):
+        self.projector = FanBeam(img_size=size, n_angles=len(angles), angles=angles).to(device)
+
+    def forward(self, image):
+        return self.projector.forward(image)
+
+    def backproject(self, sinogram):
+        return self.projector.backward(sinogram)
+
+    def fbp(self, sinogram):
+        return self.projector.fbp(sinogram)
+
+
+class LeapFanBackend:
+    name = "leap"
+
+    def __init__(self, size, angles, device):
+        self.projector = LeapFanBeam(img_size=size, n_angles=len(angles), angles=angles).to(device)
+
+    def forward(self, image):
+        return self.projector.forward(image)
+
+    def backproject(self, sinogram):
+        return self.projector.backward(sinogram)
+
+    def fbp(self, sinogram):
+        return self.projector.fbp(sinogram)
+
+
+class TorchRadonFanBackend:
+    name = "torch-radon"
+
+    def __init__(self, size, angles, device):
+        reference = FanBeam(img_size=size, n_angles=len(angles), angles=angles.cpu())
+        spacing = reference.det_width / reference.n_det
+        self.radon = RadonFanbeam(
+            size,
+            angles.detach().cpu().numpy(),
+            source_distance=reference.src_dist,
+            det_distance=reference.det_dist,
+            det_count=reference.n_det,
+            det_spacing=spacing,
+            clip_to_circle=True,
+        )
+        self.size = size
+
+    def forward(self, image):
+        return self.radon.forward(image)
+
+    def backproject(self, sinogram):
+        return self.radon.backprojection(sinogram)
+
+    def filter_sinogram(self, sinogram, filter_name="ramp"):
+        return TorchRadonBackend.filter_sinogram(self, sinogram, filter_name)
+
+    def fbp(self, sinogram):
+        return self.radon.backprojection(self.filter_sinogram(sinogram))
+
+
+def available_backends(geometry="parallel"):
+    if geometry == "fan":
+        backends = [TorchtomoFanBackend]
+        if LeapFanBeam is not None:
+            backends.append(LeapFanBackend)
+        if RadonFanbeam is not None:
+            backends.append(TorchRadonFanBackend)
+        return backends
     backends = [TorchtomoBackend]
     if LeapParallelBeam is not None:
         backends.append(LeapBackend)
     if Radon is not None:
         backends.append(TorchRadonBackend)
     return backends
+
+
+def angle_tensor(n_angles, device, geometry):
+    span = 2 * np.pi if geometry == "fan" else np.pi
+    return torch.arange(n_angles, device=device, dtype=torch.float32) * (span / n_angles)
 
 
 def make_phantom(name, size, device):
@@ -158,11 +234,11 @@ def measure_quality(args, device, results):
         reference = ParallelBeam(img_size=size, n_angles=args.angles[0]).to(device)
         mask = reference.circle_mask.view(1, 1, size, size)
         for n_angles in args.angles:
-            angles = torch.arange(n_angles, device=device, dtype=torch.float32) * (np.pi / n_angles)
+            angles = angle_tensor(n_angles, device, args.geometry)
             for phantom_name in args.phantoms:
                 truth = make_phantom(phantom_name, size, device) * mask
                 sinograms = {}
-                for backend_class in available_backends():
+                for backend_class in available_backends(args.geometry):
                     backend = backend_class(size, angles, device)
                     sinogram = backend.forward(truth)
                     reconstruction = backend.fbp(sinogram) * mask
@@ -223,10 +299,10 @@ def measure_speed_and_memory(args, device, results):
     """
     for size in args.sizes:
         for n_angles in args.angles:
-            angles = torch.arange(n_angles, device=device, dtype=torch.float32) * (np.pi / n_angles)
+            angles = angle_tensor(n_angles, device, args.geometry)
             for batch in args.batches:
                 truth = make_phantom("shepp-logan", size, device).repeat(batch, 1, 1, 1)
-                for backend_class in available_backends():
+                for backend_class in available_backends(args.geometry):
                     backend = backend_class(size, angles, device)
                     sinogram = backend.forward(truth).detach()
                     operations = {
@@ -275,12 +351,16 @@ def save_figure(args, device, path):
     import matplotlib.pyplot as plt
 
     size, n_angles = args.figure_size, args.figure_angles
-    angles = torch.arange(n_angles, device=device, dtype=torch.float32) * (np.pi / n_angles)
-    reference = ParallelBeam(img_size=size, n_angles=n_angles).to(device)
+    angles = angle_tensor(n_angles, device, args.geometry)
+    reference = (
+        FanBeam(img_size=size, n_angles=n_angles)
+        if args.geometry == "fan"
+        else ParallelBeam(img_size=size, n_angles=n_angles)
+    ).to(device)
     mask = reference.circle_mask.view(1, 1, size, size)
     truth = make_phantom("shepp-logan", size, device) * mask
 
-    backends = available_backends()
+    backends = available_backends(args.geometry)
     figure, axes = plt.subplots(len(backends), 4, figsize=(13, 3.3 * len(backends)))
     axes = np.atleast_2d(axes)
     for row, backend_class in enumerate(backends):
@@ -308,7 +388,7 @@ def save_figure(args, device, path):
             axes[row, column].set_xticks([])
             axes[row, column].set_yticks([])
 
-    figure.suptitle(f"Parallel beam, {size} px, {n_angles} angles, ramp filter", fontsize=13)
+    figure.suptitle(f"{args.geometry.capitalize()} beam, {size} px, {n_angles} angles, ramp filter", fontsize=13)
     figure.tight_layout()
     figure.savefig(path, dpi=110)
     print(f"  figure written to {path}")
@@ -380,19 +460,21 @@ def main():
     parser.add_argument("--figure-angles", type=int, default=90)
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--runs", type=int, default=20)
+    parser.add_argument("--geometry", choices=("parallel", "fan"), default="parallel")
     args = parser.parse_args()
 
     if not torch.cuda.is_available():
         raise RuntimeError("this comparison needs CUDA: torch-radon and LEAP are CUDA only")
     device = torch.device("cuda")
     args.output.mkdir(parents=True, exist_ok=True)
-    names = [backend.name for backend in available_backends()]
+    names = [backend.name for backend in available_backends(args.geometry)]
     print(f"libraries: {', '.join(names)}")
     print(f"device: {torch.cuda.get_device_name(0)}")
 
     results = {
         "device": torch.cuda.get_device_name(0),
         "torch": str(torch.__version__),
+        "geometry": args.geometry,
         "libraries": names,
         "quality": [],
         "agreement": [],

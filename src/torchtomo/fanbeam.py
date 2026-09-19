@@ -181,6 +181,10 @@ class FanBeam(BaseProjector):
         weight = 1.0 / U.clamp_min(1e-6).square()
         return grid, weight
 
+    def _backward_grid(self, start: int, end: int) -> torch.Tensor:
+        """Detector sampling grids for one chunk of angles, shape [count, H, W, 2]."""
+        return self.backward_grids[start:end]
+
     def _direct_adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
         """A^T y by calling grid_sample's input backward, skipping a throwaway forward."""
         batch = sinogram.shape[0]
