@@ -6,6 +6,7 @@ import numpy as np
 import torch
 
 from ._sampling import grid_sample_input_backward, sample_bilinear
+from ._triton_kernels import triton_adjoint, triton_backproject, triton_forward, triton_kernels_available
 from .base import BaseProjector
 from .filters import FilterType, apply_filter
 
@@ -32,6 +33,7 @@ class ParallelBeam(BaseProjector):
         circle: bool = True,
         grid_cache_bytes: int = 256 << 20,
         sparse_adjoint: bool = False,
+        triton: bool = False,
     ):
         """
         Initialize parallel beam projector.
@@ -57,6 +59,9 @@ class ParallelBeam(BaseProjector):
                 apply its transpose with a sparse-dense product. Off by default:
                 the matrix is hundreds of megabytes at 512 px / 90 angles and
                 does not fit comfortably at 512 px / 360 angles on an 11 GB card.
+            triton: If True and CUDA plus Triton are available, use fused kernels
+                for forward, adjoint, and analytical backprojection. Off by default.
+                The eager path remains the reference and the fallback.
         """
         n_det = n_det or img_size
         super().__init__(img_size, n_angles, n_det, angle_range)
@@ -71,6 +76,7 @@ class ParallelBeam(BaseProjector):
         # 512 px and 360 angles. They are rebuilt per chunk instead.
         self.grid_cache_bytes = grid_cache_bytes
         self.sparse_adjoint = sparse_adjoint
+        self.triton = triton
         self._sparse_adjoint_matrix = None
         self._grid_cache: dict = {}
         self._grid_cache_used = 0
@@ -239,6 +245,11 @@ class ParallelBeam(BaseProjector):
         operator is linear, so the image gradient does not depend on the image.
         """
         batch = sinogram.shape[0]
+        if self.triton and triton_kernels_available(sinogram.device):
+            out = triton_adjoint(sinogram, self.angles, self.pixel_size)
+            if self.circle:
+                out = out * self.circle_mask.view(1, 1, self.img_size, self.img_size)
+            return out
         if self.sparse_adjoint:
             matrix = self._ensure_sparse_adjoint_matrix()
             return (matrix @ sinogram.reshape(batch, -1).t()).t().reshape(batch, 1, self.img_size, self.img_size)
@@ -278,6 +289,9 @@ class ParallelBeam(BaseProjector):
         if self.circle:
             x = x * self.circle_mask.view(1, 1, self.img_size, self.img_size)
 
+        if self.triton and triton_kernels_available(x.device):
+            return triton_forward(x, self.angles, self.pixel_size)
+
         projections = []
         size = self.img_size
         chunk_size = self._angle_chunk_size(B, size * size, x.device)
@@ -316,6 +330,11 @@ class ParallelBeam(BaseProjector):
             Back-projected image [B, 1, H, W]
         """
         B = sinogram.shape[0]
+        if self.triton and triton_kernels_available(sinogram.device):
+            recon = triton_backproject(sinogram, self.angles, self.angle_step)
+            if self.circle:
+                recon = recon * self.circle_mask.view(1, 1, self.img_size, self.img_size)
+            return recon
         recon = torch.zeros(B, 1, self.img_size, self.img_size, device=sinogram.device)
         chunk_size = self._angle_chunk_size(B, self.img_size * self.img_size, sinogram.device)
 

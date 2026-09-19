@@ -252,6 +252,40 @@ def test_sparse_adjoint_matches_eager_cuda():
     torch.testing.assert_close(sparse.adjoint(y), eager.adjoint(y), rtol=2e-5, atol=2e-6)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_triton_matches_eager_forward_adjoint_backproject():
+    from torchtomo._triton_kernels import triton_kernels_available
+
+    if not triton_kernels_available(torch.device("cuda")):
+        pytest.skip("Triton unavailable")
+    torch.manual_seed(26)
+    for size, n_angles, circle in ((16, 7, True), (32, 45, False)):
+        eager = ParallelBeam(img_size=size, n_angles=n_angles, circle=circle).cuda()
+        fast = ParallelBeam(img_size=size, n_angles=n_angles, circle=circle, triton=True).cuda()
+        x = torch.randn(2, 1, size, size, device="cuda")
+        y = torch.randn(2, 1, n_angles, size, device="cuda")
+        torch.testing.assert_close(fast.forward(x), eager.forward(x), rtol=2e-4, atol=2e-5)
+        torch.testing.assert_close(fast.adjoint(y), eager.adjoint(y), rtol=2e-4, atol=2e-5)
+        torch.testing.assert_close(fast.backward(y), fast.adjoint(y))
+        torch.testing.assert_close(fast.backproject(y), eager.backproject(y), rtol=2e-4, atol=2e-5)
+        ax, aty = fast.forward(x), fast.adjoint(y)
+        lhs = (ax * y).flatten(1).sum(1)
+        rhs = (x * aty).flatten(1).sum(1)
+        scale = ax.flatten(1).norm(dim=1) * y.flatten(1).norm(dim=1)
+        scale = scale + x.flatten(1).norm(dim=1) * aty.flatten(1).norm(dim=1)
+        assert torch.all((lhs - rhs).abs() <= 5e-5 * scale)
+
+
+def test_triton_flag_falls_back_on_cpu():
+    torch.manual_seed(27)
+    eager = ParallelBeam(img_size=8, n_angles=5, circle=False)
+    flagged = ParallelBeam(img_size=8, n_angles=5, circle=False, triton=True)
+    x = torch.randn(1, 1, 8, 8)
+    y = torch.randn(1, 1, 5, 8)
+    torch.testing.assert_close(flagged.forward(x), eager.forward(x))
+    torch.testing.assert_close(flagged.adjoint(y), eager.adjoint(y))
+
+
 def test_sparse_adjoint_gradcheck():
     torch.manual_seed(25)
     projector = ParallelBeam(img_size=3, n_angles=5, circle=False, sparse_adjoint=True).double()

@@ -116,6 +116,10 @@ that device. Computation stays on MPS without requiring CPU fallback.
 Geometry is fixed and must not change between evaluation and backpropagation;
 geometry gradients are not supported. Match projector and input device/dtype.
 
+`ParallelBeam(..., triton=True)` uses fused CUDA kernels for forward, adjoint, and
+FBP backprojection when Triton is available. Off by default; CPU, MPS, and a
+missing Triton install keep the eager kernels.
+
 `ParallelBeam(..., sparse_adjoint=True)` builds a CSR matrix of the forward map
 once and applies its transpose with a sparse-dense product. Off by default: the
 matrix is hundreds of megabytes at 512 px with 90 angles.
