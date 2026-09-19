@@ -160,12 +160,12 @@ def build_projector(args):
             from leap_projector import LeapFanBeam
 
             return LeapFanBeam(**kwargs)
-        return FanBeam(**kwargs)
+        return FanBeam(**kwargs, backend=getattr(args, "backend", "torch"))
     if args.projector == "leap":
         from leap_projector import LeapParallelBeam
 
         return LeapParallelBeam(img_size=args.image_size, n_angles=args.angles)
-    return ParallelBeam(img_size=args.image_size, n_angles=args.angles)
+    return ParallelBeam(img_size=args.image_size, n_angles=args.angles, backend=getattr(args, "backend", "torch"))
 
 
 def prepare_data(args, output):
@@ -615,6 +615,12 @@ def main():
         choices=("torchtomo", "leap"),
         default="torchtomo",
         help="Which projector kernels to run on; leap needs benchmark/ on PYTHONPATH and LEAP installed",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("torch", "cuda"),
+        default="torch",
+        help="torchtomo kernels: torch runs anywhere; cuda compiles CUDA kernels at first use with PyTorch's NVRTC",
     )
     parser.add_argument(
         "--geometry",

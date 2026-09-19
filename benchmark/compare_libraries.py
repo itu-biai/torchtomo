@@ -25,6 +25,7 @@ import torch
 from torch.nn import functional as F
 
 from torchtomo import FanBeam, ParallelBeam, shepp_logan
+from torchtomo._nvrtc import runtime_available
 from torchtomo.phantom import circle_phantom
 
 # torch-radon 1.0 predates two removals it depends on: np.int, and torch.rfft.
@@ -81,6 +82,15 @@ class TorchtomoBackend:
 
     def fbp(self, sinogram):
         return self.projector.fbp(sinogram)
+
+
+class TorchtomoCudaBackend(TorchtomoBackend):
+    """torchtomo with backend="cuda": the runtime-compiled kernels."""
+
+    name = "torchtomo-cuda"
+
+    def __init__(self, size, angles, device):
+        self.projector = ParallelBeam(img_size=size, n_angles=len(angles), angles=angles, backend="cuda").to(device)
 
 
 class LeapBackend:
@@ -149,6 +159,15 @@ class TorchtomoFanBackend:
         return self.projector.fbp(sinogram)
 
 
+class TorchtomoCudaFanBackend(TorchtomoFanBackend):
+    """torchtomo FanBeam with backend="cuda": the runtime-compiled kernels."""
+
+    name = "torchtomo-cuda"
+
+    def __init__(self, size, angles, device):
+        self.projector = FanBeam(img_size=size, n_angles=len(angles), angles=angles, backend="cuda").to(device)
+
+
 class LeapFanBackend:
     name = "leap"
 
@@ -196,14 +215,19 @@ class TorchRadonFanBackend:
 
 
 def available_backends(geometry="parallel"):
+    cuda_kernels = torch.cuda.is_available() and runtime_available()
     if geometry == "fan":
         backends = [TorchtomoFanBackend]
+        if cuda_kernels:
+            backends.append(TorchtomoCudaFanBackend)
         if LeapFanBeam is not None:
             backends.append(LeapFanBackend)
         if RadonFanbeam is not None:
             backends.append(TorchRadonFanBackend)
         return backends
     backends = [TorchtomoBackend]
+    if cuda_kernels:
+        backends.append(TorchtomoCudaBackend)
     if LeapParallelBeam is not None:
         backends.append(LeapBackend)
     if Radon is not None:

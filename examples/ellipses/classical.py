@@ -79,6 +79,8 @@ def subset_projectors(projector, count):
                 det_width=projector.det_width,
                 n_samples=projector.n_samples,
             )
+        if getattr(projector, "backend", "torch") != "torch":
+            kwargs["backend"] = projector.backend
         subset = type(projector)(**kwargs).to(projector.angles.device)
         if not torch.allclose(subset.angles, chosen, atol=1e-5):
             raise ValueError("angle subset is not evenly spaced; SART needs a uniform angle grid")
