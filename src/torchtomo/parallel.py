@@ -11,6 +11,53 @@ from .base import BaseProjector
 from .filters import FilterType, apply_filter
 
 
+class _TritonProject(torch.autograd.Function):
+    """A x via the fused kernel; backward is the gather adjoint, including the circle mask."""
+
+    @staticmethod
+    def forward(ctx, image: torch.Tensor, projector: "ParallelBeam") -> torch.Tensor:
+        ctx.projector = projector
+        x = image
+        if projector.circle:
+            x = x * projector.circle_mask.view(1, 1, projector.img_size, projector.img_size)
+        return triton_forward(x, projector.angles, projector.pixel_size)
+
+    @staticmethod
+    def backward(ctx, grad_sinogram: torch.Tensor):
+        projector = ctx.projector
+        grad_image = triton_adjoint(grad_sinogram.contiguous(), projector.angles, projector.pixel_size)
+        if projector.circle:
+            grad_image = grad_image * projector.circle_mask.view(1, 1, projector.img_size, projector.img_size)
+        return grad_image, None
+
+
+class _TritonBackproject(torch.autograd.Function):
+    """Pixel-driven FBP backprojection via the fused kernel; VJP uses the eager interpolator."""
+
+    @staticmethod
+    def forward(ctx, sinogram: torch.Tensor, projector: "ParallelBeam") -> torch.Tensor:
+        ctx.projector = projector
+        ctx.sino_shape = tuple(sinogram.shape)
+        recon = triton_backproject(sinogram, projector.angles, projector.angle_step)
+        if projector.circle:
+            recon = recon * projector.circle_mask.view(1, 1, projector.img_size, projector.img_size)
+        return recon
+
+    @staticmethod
+    def backward(ctx, grad_image: torch.Tensor):
+        projector = ctx.projector
+        flag = projector.triton
+        projector.triton = False
+        try:
+            with torch.inference_mode(False), torch.enable_grad():
+                sino = torch.zeros(ctx.sino_shape, device=grad_image.device, dtype=grad_image.dtype, requires_grad=True)
+                recon = projector.backproject(sino)
+                grad_sino = torch.autograd.grad(recon, sino, grad_image.contiguous())[0]
+        finally:
+            projector.triton = flag
+        return grad_sino, None
+
+
 class ParallelBeam(BaseProjector):
     """
     Parallel beam CT projector.
@@ -84,6 +131,9 @@ class ParallelBeam(BaseProjector):
         self._grid_cache: dict = {}
         self._grid_cache_used = 0
         self._set_coordinate_buffers(self.angles.device, self.angles.dtype)
+
+    def _use_triton(self, tensor: torch.Tensor) -> bool:
+        return bool(self.triton) and triton_kernels_available(tensor.device, tensor.dtype)
 
     def _set_coordinate_buffers(self, device: torch.device, dtype: torch.dtype) -> None:
         """Rebuild the base lattice in `dtype` so `.double()` is not a float32 cast."""
@@ -248,7 +298,7 @@ class ParallelBeam(BaseProjector):
         operator is linear, so the image gradient does not depend on the image.
         """
         batch = sinogram.shape[0]
-        if self.triton and triton_kernels_available(sinogram.device):
+        if self._use_triton(sinogram):
             out = triton_adjoint(sinogram, self.angles, self.pixel_size)
             if self.circle:
                 out = out * self.circle_mask.view(1, 1, self.img_size, self.img_size)
@@ -287,13 +337,12 @@ class ParallelBeam(BaseProjector):
             Sinogram [B, 1, n_angles, n_det]
         """
         B = x.shape[0]
+        if self._use_triton(x):
+            return _TritonProject.apply(x, self)
 
         # Apply circle mask if enabled
         if self.circle:
             x = x * self.circle_mask.view(1, 1, self.img_size, self.img_size)
-
-        if self.triton and triton_kernels_available(x.device):
-            return triton_forward(x, self.angles, self.pixel_size)
 
         projections = []
         size = self.img_size
@@ -333,11 +382,8 @@ class ParallelBeam(BaseProjector):
             Back-projected image [B, 1, H, W]
         """
         B = sinogram.shape[0]
-        if self.triton and triton_kernels_available(sinogram.device):
-            recon = triton_backproject(sinogram, self.angles, self.angle_step)
-            if self.circle:
-                recon = recon * self.circle_mask.view(1, 1, self.img_size, self.img_size)
-            return recon
+        if self._use_triton(sinogram):
+            return _TritonBackproject.apply(sinogram, self)
         recon = torch.zeros(B, 1, self.img_size, self.img_size, device=sinogram.device)
         chunk_size = self._angle_chunk_size(B, self.img_size * self.img_size, sinogram.device)
 

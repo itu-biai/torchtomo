@@ -252,12 +252,16 @@ def test_sparse_adjoint_matches_eager_cuda():
     torch.testing.assert_close(sparse.adjoint(y), eager.adjoint(y), rtol=2e-5, atol=2e-6)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
-def test_triton_matches_eager_forward_adjoint_backproject():
+def _require_triton_cuda():
     from torchtomo._triton_kernels import triton_kernels_available
 
-    if not triton_kernels_available(torch.device("cuda")):
-        pytest.skip("Triton unavailable")
+    if not torch.cuda.is_available() or not triton_kernels_available(torch.device("cuda"), torch.float32):
+        pytest.skip("Triton CUDA float32 unavailable")
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_triton_matches_eager_forward_adjoint_backproject():
+    _require_triton_cuda()
     torch.manual_seed(26)
     for size, n_angles, circle in ((16, 7, True), (32, 45, False)):
         eager = ParallelBeam(img_size=size, n_angles=n_angles, circle=circle).cuda()
@@ -274,6 +278,63 @@ def test_triton_matches_eager_forward_adjoint_backproject():
         scale = ax.flatten(1).norm(dim=1) * y.flatten(1).norm(dim=1)
         scale = scale + x.flatten(1).norm(dim=1) * aty.flatten(1).norm(dim=1)
         assert torch.all((lhs - rhs).abs() <= 5e-5 * scale)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_triton_forward_vjp_matches_adjoint():
+    """Shipped CUDA triton forward is differentiable; its VJP is the gather adjoint."""
+    _require_triton_cuda()
+    torch.manual_seed(28)
+    projector = ParallelBeam(img_size=16, n_angles=11, circle=True, triton=True).cuda()
+    x = torch.randn(2, 1, 16, 16, device="cuda", requires_grad=True)
+    y = torch.randn(2, 1, 11, 16, device="cuda", requires_grad=True)
+    sino = projector.forward(x)
+    assert sino.grad_fn is not None
+    assert "TritonProject" in type(sino.grad_fn).__name__
+    from_forward = torch.autograd.grad(sino, x, y)[0]
+    torch.testing.assert_close(from_forward, projector.adjoint(y), rtol=2e-4, atol=2e-5)
+    from_backward = torch.autograd.grad(projector.backward(y), y, x)[0]
+    torch.testing.assert_close(from_backward, projector.forward(x.detach()), rtol=2e-4, atol=2e-5)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_triton_backproject_backward_succeeds():
+    _require_triton_cuda()
+    torch.manual_seed(29)
+    projector = ParallelBeam(img_size=16, n_angles=11, circle=True, triton=True).cuda()
+    y = torch.randn(2, 1, 11, 16, device="cuda", requires_grad=True)
+    recon = projector.backproject(y)
+    assert recon.grad_fn is not None
+    grad = torch.autograd.grad(recon, y, torch.ones_like(recon))[0]
+    assert torch.isfinite(grad).all()
+    assert grad.norm() > 0
+    eager = ParallelBeam(img_size=16, n_angles=11, circle=True).cuda()
+    y_e = y.detach().requires_grad_(True)
+    recon_e = eager.backproject(y_e)
+    grad_e = torch.autograd.grad(recon_e, y_e, torch.ones_like(recon_e))[0]
+    torch.testing.assert_close(grad, grad_e, rtol=2e-4, atol=2e-5)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_triton_double_falls_back_to_eager():
+    _require_triton_cuda()
+    torch.manual_seed(30)
+    eager = ParallelBeam(img_size=8, n_angles=6, circle=False).double().cuda()
+    fast = ParallelBeam(img_size=8, n_angles=6, circle=False, triton=True).double().cuda()
+    x = torch.randn(2, 1, 8, 8, dtype=torch.float64, device="cuda", requires_grad=True)
+    out = fast.forward(x)
+    torch.testing.assert_close(out, eager.forward(x.detach()))
+    grad = torch.autograd.grad(out.sum(), x)[0]
+    assert torch.isfinite(grad).all()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_triton_adjoint_gradcheck():
+    _require_triton_cuda()
+    torch.manual_seed(31)
+    projector = ParallelBeam(img_size=3, n_angles=5, circle=False, triton=True).double().cuda()
+    y = torch.randn(1, 1, projector.n_angles, projector.n_det, dtype=torch.float64, device="cuda", requires_grad=True)
+    assert torch.autograd.gradcheck(projector.backward, (y,))
 
 
 def test_triton_flag_falls_back_on_cpu():

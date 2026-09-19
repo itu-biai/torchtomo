@@ -17,8 +17,13 @@ except ImportError:
     _TRITON = False
 
 
-def triton_kernels_available(device: torch.device) -> bool:
-    return _TRITON and device.type == "cuda"
+def triton_kernels_available(device: torch.device, dtype: torch.dtype | None = None) -> bool:
+    """True on CUDA when Triton imported. Kernels accumulate in float32 only."""
+    if not (_TRITON and device.type == "cuda"):
+        return False
+    if dtype is not None and dtype != torch.float32:
+        return False
+    return True
 
 
 if _TRITON:
