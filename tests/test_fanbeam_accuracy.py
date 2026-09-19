@@ -160,3 +160,28 @@ class TestFanBeamAccuracy:
             assert psnr_fan >= psnr_parallel - 3.0, (
                 f"{name} fan-beam PSNR {psnr_fan:.2f} dB is more than 3 dB below parallel-beam {psnr_parallel:.2f} dB"
             )
+
+    def test_default_geometry_is_size_aware(self):
+        projector = FanBeam(img_size=512, n_angles=8, n_samples=8)
+        assert projector.src_dist == 1024
+        assert projector.det_dist == 1024
+        assert projector.n_det == 768
+        mag = (projector.src_dist + projector.det_dist) / projector.src_dist
+        virt_px = projector.det_width / projector.n_det / mag
+        assert abs(virt_px - 1.0) < 1e-6
+
+    def test_fbp_circle_psnr_within_half_db_of_parallel_at_512(self):
+        """Noiseless Shepp-Logan, 360 views, PSNR over the inscribed circle."""
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        size, n_angles = 512, 360
+        phantom = shepp_logan(size, device=device)
+        parallel = ParallelBeam(img_size=size, n_angles=n_angles).to(device)
+        fan = FanBeam(img_size=size, n_angles=n_angles).to(device)
+        mask = parallel.circle_mask.bool()
+        recon_p = parallel.fbp(parallel.forward(phantom))
+        recon_f = fan.fbp(fan.forward(phantom))
+        mse_p = ((recon_p - phantom) ** 2)[:, :, mask].mean().clamp_min(1e-12)
+        mse_f = ((recon_f - phantom) ** 2)[:, :, mask].mean().clamp_min(1e-12)
+        psnr_p = float(-10 * torch.log10(mse_p))
+        psnr_f = float(-10 * torch.log10(mse_f))
+        assert psnr_f >= psnr_p - 0.5, f"fan {psnr_f:.2f} dB vs parallel {psnr_p:.2f} dB"

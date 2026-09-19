@@ -143,8 +143,8 @@ class BaseProjector(nn.Module, ABC):
         gradients with respect to geometry are not supported. Projector buffers
         must have the same device and dtype as sinogram, as for forward().
 
-        Parallel beam on CPU and CUDA calls grid_sample's input backward kernel
-        directly. Other geometries, MPS, and older PyTorch builds fall back to a
+        Parallel beam and fan beam on CPU and CUDA call grid_sample's input
+        backward kernel directly. MPS and older PyTorch builds fall back to a
         throwaway forward VJP. Both paths work under no_grad() and inference_mode().
 
         Args:

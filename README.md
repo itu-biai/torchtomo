@@ -44,13 +44,7 @@ recon = projector.fbp(sinogram, filter_name="ramp")   # [1, 1, 256, 256]
 from torchtomo import FanBeam, shepp_logan
 
 phantom = shepp_logan(size=256)
-projector = FanBeam(
-    img_size=256,
-    n_angles=360,
-    n_det=400,
-    src_dist=500.0,
-    det_dist=500.0,
-)
+projector = FanBeam(img_size=256, n_angles=360)
 
 sinogram = projector.forward(phantom)
 recon = projector.fbp(sinogram, filter_name="hann")
@@ -105,9 +99,9 @@ LPD code can continue to use `forward()`/`backward()` as a matched pair; existin
 models may need retraining or step-size retuning after the operator change.
 
 The adjoint calls `grid_sample`'s input backward kernel directly on CPU and
-CUDA for parallel beam, then uses the explicit training gradient $g \mapsto A g$.
-That avoids both a throwaway forward and second derivatives of `grid_sample`,
-which are unavailable in some PyTorch versions. Fan-beam, MPS, and PyTorch
+CUDA for parallel beam and fan beam, then uses the explicit training gradient
+$g \mapsto A g$. That avoids both a throwaway forward and second derivatives of
+`grid_sample`, which are unavailable in some PyTorch versions. MPS and PyTorch
 builds before 1.11 (where `output_mask` was added) fall back to a temporary
 forward VJP. Both paths support `torch.no_grad()` and `torch.inference_mode()`.
 On MPS, bilinear sampling uses differentiable `gather` operations because some

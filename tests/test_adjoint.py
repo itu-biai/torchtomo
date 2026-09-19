@@ -204,21 +204,44 @@ def test_vjp_fallback_when_kernel_is_missing(monkeypatch):
     torch.testing.assert_close(projector.adjoint(y), _vjp_adjoint(projector, y))
 
 
-def test_fanbeam_adjoint_keeps_the_vjp(monkeypatch):
-    import torchtomo.parallel as parallel_mod
+def test_fan_direct_adjoint_matches_vjp():
+    from torchtomo.base import _vjp_adjoint
+
+    torch.manual_seed(33)
+    projector = _projector("fan", size=8).double()
+    y = torch.randn(2, 1, projector.n_angles, projector.n_det, dtype=torch.float64)
+    y = y.transpose(-1, -2).contiguous().transpose(-1, -2)
+    expected = _vjp_adjoint(projector, y)
+    actual = projector.adjoint(y)
+    torch.testing.assert_close(actual, expected)
+    torch.testing.assert_close(projector.backward(y), actual)
+    x = torch.randn(2, 1, 8, 8, dtype=torch.float64)
+    ax, aty = projector.forward(x), projector.adjoint(y)
+    lhs = (ax * y).flatten(1).sum(1)
+    rhs = (x * aty).flatten(1).sum(1)
+    scale = ax.flatten(1).norm(dim=1) * y.flatten(1).norm(dim=1)
+    scale = scale + x.flatten(1).norm(dim=1) * aty.flatten(1).norm(dim=1)
+    assert torch.all((lhs - rhs).abs() <= 10 * torch.finfo(torch.float64).eps * scale)
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_fan_adjoint_calls_direct_kernel(device, monkeypatch):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    import torchtomo.fanbeam as fan_mod
 
     calls = {"n": 0}
-    original = parallel_mod.grid_sample_input_backward
+    original = fan_mod.grid_sample_input_backward
 
     def wrapped(*args, **kwargs):
         calls["n"] += 1
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(parallel_mod, "grid_sample_input_backward", wrapped)
-    projector = _projector("fan", size=5)
-    y = torch.randn(1, 1, projector.n_angles, projector.n_det)
+    monkeypatch.setattr(fan_mod, "grid_sample_input_backward", wrapped)
+    projector = _projector("fan", size=5).to(device)
+    y = torch.randn(1, 1, projector.n_angles, projector.n_det, device=device)
     projector.adjoint(y)
-    assert calls["n"] == 0
+    assert calls["n"] > 0
 
 
 def test_sparse_adjoint_matches_eager_and_inner_product():

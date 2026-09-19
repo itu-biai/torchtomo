@@ -13,8 +13,7 @@ Example:
     >>> recon = projector.fbp(sinogram)
     >>>
     >>> # Fan beam
-    >>> projector = FanBeam(img_size=256, n_angles=360, n_det=400,
-    ...                     src_dist=500, det_dist=500)
+    >>> projector = FanBeam(img_size=256, n_angles=360)
     >>> sinogram = projector.forward(image)
     >>> recon = projector.fbp(sinogram)
 """
