@@ -12,6 +12,8 @@ TorchTomo provides forward projection, an exact discrete adjoint, analytical bac
 ## Features
 
 - Pure PyTorch implementation with no custom CUDA build step
+- Optional fast CUDA kernels (`backend="cuda"`), compiled at first use by the
+  NVRTC that ships with PyTorch, so installation stays `pip install torchtomo`
 - Autograd-friendly operators for learned reconstruction pipelines
 - Parallel-beam and fan-beam (flat detector) projectors
 - Built-in FBP filters: `ramp`, `shepp-logan`, `cosine`, `hamming`, `hann`, `none`
@@ -49,6 +51,40 @@ projector = FanBeam(img_size=256, n_angles=360)
 sinogram = projector.forward(phantom)
 recon = projector.fbp(sinogram, filter_name="hann")
 ```
+
+## Fast CUDA Kernels
+
+```python
+projector = ParallelBeam(img_size=512, n_angles=360, backend="cuda").cuda()
+fan = FanBeam(img_size=512, n_angles=360, backend="cuda").cuda()
+```
+
+`backend="cuda"` runs forward, adjoint, and FBP backprojection on CUDA kernels
+written in C++ and compiled the first time they are needed by NVRTC, the
+runtime compiler every CUDA build of PyTorch already installs. The kernels are
+launched through the CUDA driver on PyTorch's current stream, and the compiled
+binary is cached under `~/.cache/torchtomo` (`TORCHTOMO_KERNEL_CACHE` overrides
+the location, an empty value disables it). There is no build step, no nvcc, and
+no extra dependency. The first call compiles for about a second.
+
+The forward and adjoint are an exact matched pair of their own: the adjoint
+equals the transpose of the forward entry by entry, to float32 roundoff. They
+agree with the default PyTorch path to about 1e-5. Fan beam on this backend
+keeps only per-ray tables on the GPU (6 MB at 512 px and 360 angles, against
+2.2 GB of sampling grids for the PyTorch path). Float64, CPU, and MPS tensors
+fall back to the PyTorch path, as does a CUDA build without NVRTC.
+
+512 x 512, batch 4, RTX 2080 Ti, milliseconds for forward / adjoint / FBP:
+
+| Geometry, angles | `backend="torch"` | `backend="cuda"` | LEAP | torch-radon |
+| --- | --- | --- | --- | --- |
+| parallel, 360 | 19.3 / 37.2 / 14.3 | 2.2 / 2.0 / 0.6 | 2.6 / 1.7 / 7.5 | 0.7 / 0.6 / |
+| parallel, 90 | 3.3 / 8.1 / 3.1 | 0.6 / 0.5 / 0.2 | 1.1 / 0.6 / 3.4 | 0.2 / 0.2 / |
+| fan, 360 | 16.2 / 51.2 / 14.9 | 2.7 / 3.1 / 1.1 | 4.9 / 3.5 / 17.3 | 1.4 / 0.8 / |
+| fan, 90 | 4.0 / 12.8 / 3.8 | 0.7 / 0.8 / 0.3 | 2.0 / 1.1 / 5.9 | 0.4 / 0.2 / |
+
+torch-radon uses the GPU's texture units, whose 8-bit interpolation weights are
+fast but not exact; its FBP was not timed on the same filter.
 
 ## Differentiable Optimization Example
 
@@ -113,9 +149,9 @@ geometry gradients are not supported. Match projector and input device/dtype.
 Default projection angles cover `[start, end)` with spacing `(end - start) / n`,
 so a half-turn does not include both 0 and pi. Pass `angles=` for an explicit list.
 
-`ParallelBeam(..., triton=True)` uses fused CUDA kernels for forward, adjoint, and
-FBP backprojection when Triton is available. Off by default; CPU, MPS, and a
-missing Triton install keep the eager kernels.
+`ParallelBeam(..., backend="triton")` (or the older `triton=True`) uses fused
+Triton kernels for forward, adjoint, and FBP backprojection when Triton is
+available. `backend="cuda"`, above, is faster and covers fan beam too.
 
 `ParallelBeam(..., sparse_adjoint=True)` builds a CSR matrix of the forward map
 once and applies its transpose with a sparse-dense product. Off by default: the
@@ -139,8 +175,8 @@ PYTHONPATH=src python benchmark/benchmark_adjoint.py --pairs 500 --dtype float64
 
 ## API Snapshot
 
-- `ParallelBeam(...)`
-- `FanBeam(...)`
+- `ParallelBeam(..., backend="torch" | "cuda" | "triton")`
+- `FanBeam(..., backend="torch" | "cuda")`
 - `projector.forward(image)`
 - `projector.backward(sinogram)`: exact discrete adjoint, for LPD/iterative methods
 - `projector.adjoint(sinogram)`: equivalent to `backward(sinogram)`

@@ -236,7 +236,9 @@ def _driver_check(driver, code: int, what: str) -> None:
 
 def runtime_available() -> bool:
     """True when NVRTC and the CUDA driver load. Cached; never raises."""
-    if not torch.cuda.is_available():
+    if _libraries is not None:
+        return True
+    if _load_error is not None or not torch.cuda.is_available():
         return False
     try:
         _load()

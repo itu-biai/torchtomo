@@ -26,6 +26,8 @@ GEOMETRIES = [
     (FanBeam, dict(img_size=33, n_angles=12, circle=False)),
     (FanBeam, dict(img_size=40, n_angles=30, n_det=50, n_samples=64, src_dist=60.0, det_dist=40.0)),
     (FanBeam, dict(img_size=48, n_angles=24, n_samples=1)),
+    # A source a few pixels from the image: the adjoint's exact-division branch.
+    (FanBeam, dict(img_size=24, n_angles=16, src_dist=20.0, det_dist=10.0)),
 ]
 
 

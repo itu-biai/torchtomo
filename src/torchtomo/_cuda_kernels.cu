@@ -400,23 +400,48 @@ __device__ void fan_adjoint(const float* __restrict__ sino, const float4* __rest
             const float4 v0 = views[2 * a], v1 = views[2 * a + 1];
             const float rx = jf - v0.x, ry = mid - v0.y;
             const float lat = rx * v0.z + ry * v0.w, dep = rx * v1.x + ry * v1.y;
-            // Bin of each corner of the pixels' joint support, alpha l / e + beta, with
-            // 1 / (dep + de) expanded to second order about 1 / dep: de is a few
-            // pixels against a depth of hundreds, so the third-order remainder is far
-            // inside the 0.01 bin slack below.
-            const float rcp = __frcp_rn(dep);
+            // Bin of each corner of the pixels' joint support, alpha l / e + beta. Far
+            // from the source (every default geometry) 1 / (dep + de) is expanded to
+            // second order about 1 / dep: de is under two pixels, so beyond 64 px the
+            // third-order remainder is far inside the 0.01 bin slack below. Nearer,
+            // each corner is divided exactly; a corner at or behind the source plane
+            // widens the range to the whole detector, and a support entirely behind
+            // it holds no samples at all, since every sample lies in front.
             float dmin = 1e30f, dmax = -1e30f;
+            if (dep > 64.f) {
+                const float rcp = __frcp_rn(dep);
 #pragma unroll
-            for (int q = 0; q < 4; ++q) {
-                const float ox = (q & 1) ? 1.f : -1.f, oy = (q & 2) ? half_y : -half_y;
-                const float l = lat + ox * v0.z + oy * v0.w;
-                const float x = (ox * v1.x + oy * v1.y) * rcp;
-                const float dd = l * rcp * (1.f - x + x * x) * alpha + beta;
-                dmin = fminf(dmin, dd);
-                dmax = fmaxf(dmax, dd);
+                for (int q = 0; q < 4; ++q) {
+                    const float ox = (q & 1) ? 1.f : -1.f, oy = (q & 2) ? half_y : -half_y;
+                    const float l = lat + ox * v0.z + oy * v0.w;
+                    const float x = (ox * v1.x + oy * v1.y) * rcp;
+                    const float dd = l * rcp * (1.f - x + x * x) * alpha + beta;
+                    dmin = fminf(dmin, dd);
+                    dmax = fmaxf(dmax, dd);
+                }
+            } else {
+                int behind = 0;
+#pragma unroll
+                for (int q = 0; q < 4; ++q) {
+                    const float ox = (q & 1) ? 1.f : -1.f, oy = (q & 2) ? half_y : -half_y;
+                    const float l = lat + ox * v0.z + oy * v0.w;
+                    const float e = dep + ox * v1.x + oy * v1.y;
+                    if (e <= 0.f) {
+                        ++behind;
+                        continue;
+                    }
+                    const float dd = l / e * alpha + beta;
+                    dmin = fminf(dmin, dd);
+                    dmax = fmaxf(dmax, dd);
+                }
+                if (behind == 4) continue;
+                if (behind > 0) {
+                    dmin = -1e30f;
+                    dmax = 1e30f;
+                }
             }
-            const int d_lo = max(0, (int)ceilf(dmin - 0.01f));
-            const int d_hi = min(n_det - 1, (int)floorf(dmax + 0.01f));
+            const int d_lo = (int)fmaxf(0.f, ceilf(dmin - 0.01f));
+            const int d_hi = (int)fminf((float)(n_det - 1), floorf(dmax + 0.01f));
             const float* row = sino + (size_t)a * n_det * C;
             for (int d = d_lo; d <= d_hi; ++d) {
                 const size_t r = (size_t)a * n_det + d;
