@@ -68,8 +68,8 @@ def subset_projectors(projector, count):
             img_size=projector.img_size,
             n_angles=len(chosen),
             n_det=projector.n_det,
-            angle_range=(chosen[0].item(), chosen[-1].item()),
             circle=projector.circle,
+            angles=chosen,
         ).to(projector.angles.device)
         if not torch.allclose(subset.angles, chosen, atol=1e-5):
             raise ValueError("angle subset is not evenly spaced; SART needs a uniform angle grid")

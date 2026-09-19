@@ -65,7 +65,7 @@ class TorchtomoBackend:
     name = "torchtomo"
 
     def __init__(self, size, angles, device):
-        self.projector = ParallelBeam(img_size=size, n_angles=len(angles)).to(device)
+        self.projector = ParallelBeam(img_size=size, n_angles=len(angles), angles=angles).to(device)
 
     @property
     def angles(self):
@@ -85,7 +85,7 @@ class LeapBackend:
     name = "leap"
 
     def __init__(self, size, angles, device):
-        self.projector = LeapParallelBeam(img_size=size, n_angles=len(angles)).to(device)
+        self.projector = LeapParallelBeam(img_size=size, n_angles=len(angles), angles=angles).to(device)
 
     def forward(self, image):
         return self.projector.forward(image)
@@ -158,7 +158,7 @@ def measure_quality(args, device, results):
         reference = ParallelBeam(img_size=size, n_angles=args.angles[0]).to(device)
         mask = reference.circle_mask.view(1, 1, size, size)
         for n_angles in args.angles:
-            angles = torch.linspace(0, np.pi, n_angles, device=device)
+            angles = torch.arange(n_angles, device=device, dtype=torch.float32) * (np.pi / n_angles)
             for phantom_name in args.phantoms:
                 truth = make_phantom(phantom_name, size, device) * mask
                 sinograms = {}
@@ -223,7 +223,7 @@ def measure_speed_and_memory(args, device, results):
     """
     for size in args.sizes:
         for n_angles in args.angles:
-            angles = torch.linspace(0, np.pi, n_angles, device=device)
+            angles = torch.arange(n_angles, device=device, dtype=torch.float32) * (np.pi / n_angles)
             for batch in args.batches:
                 truth = make_phantom("shepp-logan", size, device).repeat(batch, 1, 1, 1)
                 for backend_class in available_backends():
@@ -275,7 +275,7 @@ def save_figure(args, device, path):
     import matplotlib.pyplot as plt
 
     size, n_angles = args.figure_size, args.figure_angles
-    angles = torch.linspace(0, np.pi, n_angles, device=device)
+    angles = torch.arange(n_angles, device=device, dtype=torch.float32) * (np.pi / n_angles)
     reference = ParallelBeam(img_size=size, n_angles=n_angles).to(device)
     mask = reference.circle_mask.view(1, 1, size, size)
     truth = make_phantom("shepp-logan", size, device) * mask

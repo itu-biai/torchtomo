@@ -34,6 +34,7 @@ class ParallelBeam(BaseProjector):
         grid_cache_bytes: int = 256 << 20,
         sparse_adjoint: bool = False,
         triton: bool = False,
+        angles: Optional[torch.Tensor] = None,
     ):
         """
         Initialize parallel beam projector.
@@ -62,9 +63,11 @@ class ParallelBeam(BaseProjector):
             triton: If True and CUDA plus Triton are available, use fused kernels
                 for forward, adjoint, and analytical backprojection. Off by default.
                 The eager path remains the reference and the fallback.
+            angles: Explicit angle samples in radians. When omitted, n_angles
+                samples cover [start, end) with spacing (end - start) / n_angles.
         """
         n_det = n_det or img_size
-        super().__init__(img_size, n_angles, n_det, angle_range)
+        super().__init__(img_size, n_angles, n_det, angle_range, angles=angles)
 
         self.circle = circle
 

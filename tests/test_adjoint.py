@@ -293,15 +293,35 @@ def test_sparse_adjoint_gradcheck():
     assert torch.autograd.gradcheck(projector.backward, (y,))
 
 
+def test_default_angles_exclude_the_far_endpoint_and_match_angle_step():
+    projector = ParallelBeam(img_size=8, n_angles=4)
+    expected = torch.arange(4, dtype=torch.float32) * (torch.pi / 4)
+    torch.testing.assert_close(projector.angles, expected, atol=0, rtol=0)
+    assert projector.angles[-1] < torch.pi
+    spacing = projector.angles[1:] - projector.angles[:-1]
+    torch.testing.assert_close(spacing, torch.full_like(spacing, projector.angle_step))
+
+
+def test_explicit_angles_are_kept_and_cast_with_dtype():
+    chosen = torch.tensor([0.1, 0.5, 1.2], dtype=torch.float64)
+    projector = ParallelBeam(img_size=8, n_angles=3, angles=chosen)
+    torch.testing.assert_close(projector.angles, chosen.float())
+    projector64 = projector.double()
+    torch.testing.assert_close(projector64.angles, chosen)
+    fan = FanBeam(img_size=8, n_angles=3, n_det=10, n_samples=8, angles=chosen)
+    torch.testing.assert_close(fan.angles, chosen.float())
+
+
 def test_float64_coordinates_are_rebuilt_not_promoted():
     size, n_angles = 8, 7
     angle_range = (0.13, 2.71)
     projector = ParallelBeam(img_size=size, n_angles=n_angles, angle_range=angle_range)
-    expected32 = torch.linspace(*angle_range, n_angles, dtype=torch.float32)
+    step = (angle_range[1] - angle_range[0]) / n_angles
+    expected32 = torch.arange(n_angles, dtype=torch.float32) * step + angle_range[0]
     torch.testing.assert_close(projector.angles, expected32, atol=0, rtol=0)
 
     projector64 = projector.double()
-    expected64 = torch.linspace(*angle_range, n_angles, dtype=torch.float64)
+    expected64 = torch.arange(n_angles, dtype=torch.float64) * step + angle_range[0]
     torch.testing.assert_close(projector64.angles, expected64, atol=0, rtol=0)
     coords = torch.linspace(-1, 1, size, dtype=torch.float64)
     grid_y, grid_x = torch.meshgrid(coords, coords, indexing="ij")

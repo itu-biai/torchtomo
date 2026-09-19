@@ -54,9 +54,18 @@ class LeapParallelBeam(ParallelBeam):
     RAM_LAK = 12
 
     def __init__(
-        self, img_size=256, n_angles=180, n_det=None, angle_range=(0, np.pi), circle=True, gpu=0, ramp_filter=RAM_LAK
+        self,
+        img_size=256,
+        n_angles=180,
+        n_det=None,
+        angle_range=(0, np.pi),
+        circle=True,
+        gpu=0,
+        ramp_filter=RAM_LAK,
+        angles=None,
+        **kwargs,
     ):
-        super().__init__(img_size, n_angles, n_det, angle_range, circle)
+        super().__init__(img_size, n_angles, n_det, angle_range, circle, angles=angles, **kwargs)
         if self.n_det != img_size:
             raise ValueError("the LEAP geometry here assumes a detector as wide as the image")
         self.gpu = gpu

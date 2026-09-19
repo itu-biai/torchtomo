@@ -68,22 +68,39 @@ class BaseProjector(nn.Module, ABC):
         n_angles: int,
         n_det: int,
         angle_range: tuple[float, float] = (0, torch.pi),
+        angles: torch.Tensor | None = None,
     ):
         super().__init__()
         self.img_size = img_size
-        self.n_angles = n_angles
         self.n_det = n_det
         self.angle_range = angle_range
-        self.angle_step = (angle_range[1] - angle_range[0]) / n_angles
+        if angles is not None:
+            source = torch.as_tensor(angles, dtype=torch.float64).reshape(-1).detach().cpu().contiguous()
+            if source.numel() < 1:
+                raise ValueError("angles must contain at least one value")
+            self.n_angles = int(source.numel())
+            self._explicit_angles = source
+            span = float(source[-1] - source[0]) if self.n_angles > 1 else 0.0
+            self.angle_step = span / max(self.n_angles - 1, 1)
+        else:
+            self.n_angles = n_angles
+            self._explicit_angles = None
+            self.angle_step = (angle_range[1] - angle_range[0]) / n_angles
         self._set_angle_buffer(torch.device("cpu"), torch.float32)
 
     def _set_angle_buffer(self, device: torch.device, dtype: torch.dtype) -> None:
-        """Rebuild angles in the requested dtype from the original range.
+        """Rebuild angles in the requested dtype from the original range or list.
 
-        linspace is run in `dtype`, so a float64 projector is not a promoted
-        float32 grid. float32 construction is unchanged.
+        The default list is an open interval: n samples, spacing
+        (end - start) / n, so both endpoints of a half-turn are not included.
+        An explicit list is stored in float64 and cast on `.to()`.
         """
-        angles = torch.linspace(self.angle_range[0], self.angle_range[1], self.n_angles, dtype=dtype, device=device)
+        if self._explicit_angles is not None:
+            angles = self._explicit_angles.to(device=device, dtype=dtype)
+        else:
+            start, end = float(self.angle_range[0]), float(self.angle_range[1])
+            step = (end - start) / self.n_angles
+            angles = torch.arange(self.n_angles, dtype=dtype, device=device) * step + start
         self.register_buffer("angles", angles)
 
     def _apply(self, fn, *args, **kwargs):

@@ -47,6 +47,7 @@ class FanBeam(BaseProjector):
         angle_range: tuple[float, float] = (0, 2 * np.pi),
         n_samples: int = 512,
         circle: bool = True,
+        angles: Optional[torch.Tensor] = None,
     ):
         """
         Initialize fan beam projector.
@@ -62,8 +63,10 @@ class FanBeam(BaseProjector):
             angle_range: Range of angles (default: full rotation)
             n_samples: Number of samples per ray for integration
             circle: If True, mask image to inscribed circle
+            angles: Explicit angle samples in radians. When omitted, n_angles
+                samples cover [start, end) with spacing (end - start) / n_angles.
         """
-        super().__init__(img_size, n_angles, n_det, angle_range)
+        super().__init__(img_size, n_angles, n_det, angle_range, angles=angles)
 
         self.src_dist = src_dist
         self.det_dist = det_dist

@@ -116,6 +116,9 @@ that device. Computation stays on MPS without requiring CPU fallback.
 Geometry is fixed and must not change between evaluation and backpropagation;
 geometry gradients are not supported. Match projector and input device/dtype.
 
+Default projection angles cover `[start, end)` with spacing `(end - start) / n`,
+so a half-turn does not include both 0 and pi. Pass `angles=` for an explicit list.
+
 `ParallelBeam(..., triton=True)` uses fused CUDA kernels for forward, adjoint, and
 FBP backprojection when Triton is available. Off by default; CPU, MPS, and a
 missing Triton install keep the eager kernels.
