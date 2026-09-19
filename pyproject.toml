@@ -58,6 +58,10 @@ License = "https://creativecommons.org/licenses/by-nc/4.0/"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# CUDA source compiled at run time by NVRTC; nothing is built at install.
+torchtomo = ["*.cu"]
+
 [tool.ruff]
 line-length = 120
 

@@ -5,9 +5,10 @@ from typing import Optional
 import numpy as np
 import torch
 
+from . import _cuda_kernels
 from ._sampling import grid_sample_input_backward, sample_bilinear
 from ._triton_kernels import triton_adjoint, triton_backproject, triton_forward, triton_kernels_available
-from .base import BaseProjector
+from .base import BaseProjector, _check_backend, _KernelBackproject, _KernelProject
 from .filters import FilterType, apply_filter
 
 
@@ -66,15 +67,10 @@ class _TritonBackproject(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_image: torch.Tensor):
         projector = ctx.projector
-        flag = projector.triton
-        projector.triton = False
-        try:
-            with torch.inference_mode(False), torch.enable_grad():
-                sino = torch.zeros(ctx.sino_shape, device=grad_image.device, dtype=grad_image.dtype, requires_grad=True)
-                recon = projector.backproject(sino)
-                grad_sino = torch.autograd.grad(recon, sino, grad_image.contiguous())[0]
-        finally:
-            projector.triton = flag
+        with torch.inference_mode(False), torch.enable_grad():
+            sino = torch.zeros(ctx.sino_shape, device=grad_image.device, dtype=grad_image.dtype, requires_grad=True)
+            recon = projector._backproject_eager(sino)
+            grad_sino = torch.autograd.grad(recon, sino, grad_image.contiguous())[0]
         return grad_sino, None
 
 
@@ -102,6 +98,7 @@ class ParallelBeam(BaseProjector):
         sparse_adjoint: bool = False,
         triton: bool = False,
         angles: Optional[torch.Tensor] = None,
+        backend: str = "torch",
     ):
         """
         Initialize parallel beam projector.
@@ -127,11 +124,15 @@ class ParallelBeam(BaseProjector):
                 apply its transpose with a sparse-dense product. Off by default:
                 the matrix is hundreds of megabytes at 512 px / 90 angles and
                 does not fit comfortably at 512 px / 360 angles on an 11 GB card.
-            triton: If True and CUDA plus Triton are available, use fused kernels
-                for forward, adjoint, and analytical backprojection. Off by default.
-                The eager path remains the reference and the fallback.
+            triton: Same as backend="triton"; kept for existing code.
             angles: Explicit angle samples in radians. When omitted, n_angles
                 samples cover [start, end) with spacing (end - start) / n_angles.
+            backend: "torch" (default) runs everywhere on PyTorch operations.
+                "cuda" runs float32 CUDA tensors on kernels compiled at first use
+                by the NVRTC that ships with PyTorch, so nothing is built at
+                install; the forward and adjoint are an exact matched pair of
+                their own. "triton" uses the optional Triton kernels. Both fall
+                back to "torch" on CPU, MPS, float64, or when unavailable.
         """
         n_det = n_det or img_size
         super().__init__(img_size, n_angles, n_det, angle_range, angles=angles)
@@ -146,14 +147,46 @@ class ParallelBeam(BaseProjector):
         # 512 px and 360 angles. They are rebuilt per chunk instead.
         self.grid_cache_bytes = grid_cache_bytes
         self.sparse_adjoint = sparse_adjoint
-        self.triton = triton
+        if triton:
+            if backend not in ("torch", "triton"):
+                raise ValueError(f"triton=True conflicts with backend={backend!r}")
+            backend = "triton"
+        self.backend = _check_backend(backend, ("torch", "triton", "cuda"))
         self._sparse_adjoint_matrix = None
         self._grid_cache: dict = {}
         self._grid_cache_used = 0
         self._set_coordinate_buffers(self.angles.device, self.angles.dtype)
 
+    @property
+    def triton(self) -> bool:
+        return self.backend == "triton"
+
+    @triton.setter
+    def triton(self, value: bool) -> None:
+        self.backend = "triton" if value else "torch"
+
     def _use_triton(self, tensor: torch.Tensor) -> bool:
-        return bool(self.triton) and triton_kernels_available(tensor.device, tensor.dtype)
+        return self.backend == "triton" and triton_kernels_available(tensor.device, tensor.dtype)
+
+    def _kernel_forward(self, x: torch.Tensor) -> torch.Tensor:
+        return _cuda_kernels.parallel_forward(
+            x, self._kernel_trig(x.device), self._kernel_mask(x.device), self.pixel_size
+        )
+
+    def _kernel_adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
+        return _cuda_kernels.parallel_adjoint(
+            sinogram, self._kernel_trig(sinogram.device), self._kernel_mask(sinogram.device), self.pixel_size
+        )
+
+    def _kernel_backproject(self, sinogram: torch.Tensor) -> torch.Tensor:
+        device = sinogram.device
+        return _cuda_kernels.parallel_backproject(
+            sinogram,
+            self._kernel_trig(device),
+            self._kernel_coords(device),
+            self._kernel_mask(device),
+            float(self.angle_step),
+        )
 
     def adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
         if self._use_triton(sinogram):
@@ -357,6 +390,8 @@ class ParallelBeam(BaseProjector):
             Sinogram [B, 1, n_angles, n_det]
         """
         B = x.shape[0]
+        if self._use_kernels(x):
+            return _KernelProject.apply(x, self)
         if self._use_triton(x):
             return _TritonProject.apply(x, self)
 
@@ -401,9 +436,14 @@ class ParallelBeam(BaseProjector):
         Returns:
             Back-projected image [B, 1, H, W]
         """
-        B = sinogram.shape[0]
+        if self._use_kernels(sinogram):
+            return _KernelBackproject.apply(sinogram, self)
         if self._use_triton(sinogram):
             return _TritonBackproject.apply(sinogram, self)
+        return self._backproject_eager(sinogram)
+
+    def _backproject_eager(self, sinogram: torch.Tensor) -> torch.Tensor:
+        B = sinogram.shape[0]
         recon = torch.zeros(B, 1, self.img_size, self.img_size, device=sinogram.device)
         chunk_size = self._angle_chunk_size(B, self.img_size * self.img_size, sinogram.device)
 

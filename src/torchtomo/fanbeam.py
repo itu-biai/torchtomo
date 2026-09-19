@@ -5,9 +5,13 @@ from typing import Optional
 import numpy as np
 import torch
 
+from . import _cuda_kernels
 from ._sampling import grid_sample_input_backward, sample_bilinear
-from .base import BaseProjector
+from .base import BaseProjector, _check_backend, _KernelBackproject, _KernelProject
 from .filters import FilterType, apply_filter
+
+# Grids only the PyTorch path reads: about 2.2 GB at 512 px and 360 angles.
+_EAGER_GEOMETRY = ("ray_grids", "ray_lengths", "backward_grids", "backward_weights")
 
 
 class FanBeam(BaseProjector):
@@ -46,6 +50,7 @@ class FanBeam(BaseProjector):
         n_samples: Optional[int] = None,
         circle: bool = True,
         angles: Optional[torch.Tensor] = None,
+        backend: str = "torch",
     ):
         """
         Initialize fan beam projector.
@@ -64,12 +69,20 @@ class FanBeam(BaseProjector):
                 clipped to the unit circle when this is False.
             angles: Explicit angle samples in radians. When omitted, n_angles
                 samples cover [start, end) with spacing (end - start) / n_angles.
+            backend: "torch" (default) runs everywhere on PyTorch operations.
+                "cuda" runs float32 CUDA tensors on kernels compiled at first use
+                by the NVRTC that ships with PyTorch; the forward and adjoint are
+                an exact matched pair of their own. It keeps only per-ray tables
+                on the device and builds the PyTorch path's grids (about 2.2 GB
+                at 512 px, 360 angles) only if that path is ever used, e.g. on
+                the CPU or in float64.
         """
         src_dist = float(2 * img_size if src_dist is None else src_dist)
         det_dist = float(2 * img_size if det_dist is None else det_dist)
         n_det = int(round(1.5 * img_size) if n_det is None else n_det)
         n_samples = int(img_size if n_samples is None else n_samples)
         super().__init__(img_size, n_angles, n_det, angle_range, angles=angles)
+        self.backend = _check_backend(backend, ("torch", "cuda"))
 
         self.src_dist = src_dist
         self.det_dist = det_dist
@@ -97,13 +110,11 @@ class FanBeam(BaseProjector):
     def _set_geometry_buffers(self) -> None:
         """Rebuild ray and backprojection grids in the current angles dtype."""
         dtype, device = self.angles.dtype, self.angles.device
-        ray_grids, ray_lengths = self._precompute_ray_grids()
-        self.register_buffer("ray_grids", ray_grids)
-        self.register_buffer("ray_lengths", ray_lengths)
-
-        back_grids, weights = self._precompute_backward_grids()
-        self.register_buffer("backward_grids", back_grids)
-        self.register_buffer("backward_weights", weights)
+        if self.backend == "cuda":
+            for name in _EAGER_GEOMETRY:
+                self._set_buffer(name, None)
+        else:
+            self._build_eager_geometry()
 
         det_pos = torch.linspace(
             -self._det_width_norm / 2, self._det_width_norm / 2, self.n_det, dtype=dtype, device=device
@@ -117,6 +128,126 @@ class FanBeam(BaseProjector):
             y, x = torch.meshgrid(coords, coords, indexing="ij")
             mask = (x**2 + y**2 <= 1).to(dtype=dtype)
             self.register_buffer("circle_mask", mask)
+
+    def _build_eager_geometry(self) -> None:
+        # Buffers are geometry, not activations: build them as ordinary tensors even
+        # when the first use happens under inference_mode.
+        with torch.inference_mode(False), torch.no_grad():
+            ray_grids, ray_lengths = self._precompute_ray_grids()
+            back_grids, weights = self._precompute_backward_grids()
+        self._set_buffer("ray_grids", ray_grids)
+        self._set_buffer("ray_lengths", ray_lengths)
+        self._set_buffer("backward_grids", back_grids)
+        self._set_buffer("backward_weights", weights)
+
+    def _set_buffer(self, name: str, value: torch.Tensor | None) -> None:
+        # register_buffer probes hasattr(), which would build a lazy buffer to replace it.
+        if name in self._buffers:
+            self._buffers[name] = value
+        else:
+            self.register_buffer(name, value)
+
+    def __getattr__(self, name: str):
+        # With backend='cuda' the PyTorch path's grids start as None and are built on
+        # first access, so falling back (CPU, float64) or reading them still works.
+        if name in _EAGER_GEOMETRY:
+            buffers = self.__dict__.get("_buffers", {})
+            if name in buffers and buffers[name] is None:
+                self._build_eager_geometry()
+                return buffers[name]
+        return super().__getattr__(name)
+
+    def _kernel_forward(self, x: torch.Tensor) -> torch.Tensor:
+        rays, _, weights, _ = self._kernel_rays(x.device)
+        return _cuda_kernels.fan_forward(
+            x, rays, weights, self._kernel_mask(x.device), self.n_angles, self.n_det, self.n_samples
+        )
+
+    def _kernel_adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
+        rays, inv_steps, weights, views = self._kernel_rays(sinogram.device)
+        alpha = (self._src_dist_norm + self._det_dist_norm) * (self.n_det - 1) / self._det_width_norm
+        return _cuda_kernels.fan_adjoint(
+            sinogram,
+            rays,
+            inv_steps,
+            weights,
+            views,
+            self._kernel_mask(sinogram.device),
+            self.img_size,
+            self.n_samples,
+            alpha,
+            (self.n_det - 1) / 2,
+        )
+
+    def _kernel_backproject(self, sinogram: torch.Tensor) -> torch.Tensor:
+        device = sinogram.device
+        return _cuda_kernels.fan_backproject(
+            sinogram,
+            self._kernel_trig(device),
+            self._kernel_coords(device),
+            self._kernel_mask(device),
+            self._src_dist_norm,
+            self._det_dist_norm,
+            self._det_width_norm / 2,
+            float(self.angle_step) / 2,
+        )
+
+    def _kernel_rays(self, device: torch.device) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Per-ray tables for the CUDA kernels, built in float64 and stored in float32.
+
+        rays [n_angles * n_det, 4]: entry point and sample step in pixel coordinates.
+        inv_steps [n_angles * n_det, 2]: reciprocal of the step per axis, 0 where it is 0.
+        weights [n_angles * n_det]: chord length over n_samples.
+        views [n_angles * 2, 4]: source in pixels and detector direction, then the
+        source-to-detector direction; the adjoint uses them to find candidate bins.
+        """
+
+        def build(device):
+            f64 = torch.float64
+            angles = self.angles.detach().to(device=device, dtype=f64)
+            cos_a, sin_a = torch.cos(angles).view(-1, 1), torch.sin(angles).view(-1, 1)
+            src_x, src_y = -self._src_dist_norm * sin_a, self._src_dist_norm * cos_a
+            det_cx, det_cy = self._det_dist_norm * sin_a, -self._det_dist_norm * cos_a
+            half = self._det_width_norm / 2
+            offsets = torch.linspace(-half, half, self.n_det, dtype=f64, device=device).view(1, -1)
+            dir_x = det_cx + offsets * cos_a - src_x
+            dir_y = det_cy + offsets * sin_a - src_y
+            length = torch.sqrt(dir_x**2 + dir_y**2)
+            dir_x, dir_y = dir_x / length, dir_y / length
+            b = 2 * (src_x * dir_x + src_y * dir_y)
+            c = src_x**2 + src_y**2 - 1.0
+            root = torch.sqrt(torch.clamp(b**2 - 4 * c, min=0))
+            t_entry = torch.clamp((-b - root) / 2, min=0)
+            t_exit = torch.maximum((-b + root) / 2, t_entry)
+            chord = t_exit - t_entry
+            centre = (self.img_size - 1) / 2
+            spacing = chord / (self.n_samples - 1) if self.n_samples > 1 else torch.zeros_like(chord)
+            rays = torch.stack(
+                (
+                    (src_x + t_entry * dir_x + 1) * centre,
+                    (src_y + t_entry * dir_y + 1) * centre,
+                    spacing * dir_x * centre,
+                    spacing * dir_y * centre,
+                ),
+                dim=-1,
+            )
+            steps = rays[..., 2:]
+            moving = steps.abs() > 1e-12
+            inv_steps = torch.where(moving, 1.0 / torch.where(moving, steps, torch.ones_like(steps)), 0.0)
+            weights = chord / self.n_samples
+            zeros = torch.zeros_like(cos_a)
+            views = torch.cat(
+                ((src_x + 1) * centre, (src_y + 1) * centre, cos_a, sin_a, sin_a, -cos_a, zeros, zeros), dim=-1
+            )
+            as32 = lambda t: t.to(torch.float32).contiguous()  # noqa: E731
+            return (
+                as32(rays.reshape(-1, 4)),
+                as32(inv_steps.reshape(-1, 2)),
+                as32(weights.reshape(-1)),
+                as32(views.reshape(-1, 4)),
+            )
+
+        return self._kernel_cached("rays", device, build)
 
     def _precompute_ray_grids(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Sampling grids [n_angles, n_det, n_samples, 2] and path lengths [n_angles, n_det]."""
@@ -216,6 +347,8 @@ class FanBeam(BaseProjector):
             Sinogram [B, 1, n_angles, n_det]
         """
         B = x.shape[0]
+        if self._use_kernels(x):
+            return _KernelProject.apply(x, self)
 
         if self.circle:
             x = x * self.circle_mask.view(1, 1, self.img_size, self.img_size)
@@ -249,6 +382,11 @@ class FanBeam(BaseProjector):
         Returns:
             Back-projected image [B, 1, H, W]
         """
+        if self._use_kernels(sinogram):
+            return _KernelBackproject.apply(sinogram, self)
+        return self._backproject_eager(sinogram)
+
+    def _backproject_eager(self, sinogram: torch.Tensor) -> torch.Tensor:
         B = sinogram.shape[0]
         recon = torch.zeros(B, 1, self.img_size, self.img_size, device=sinogram.device)
         chunk_size = self._angle_chunk_size(B, self.img_size * self.img_size, sinogram.device)

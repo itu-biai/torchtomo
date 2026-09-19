@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
 
+from ._cuda_kernels import cuda_kernels_available
 from ._sampling import grid_sample_input_backward_supported
 
 
@@ -49,6 +50,57 @@ class _DiscreteAdjoint(torch.autograd.Function):
         return ctx.projector.forward(grad_image), None
 
 
+class _KernelProject(torch.autograd.Function):
+    """A x on the runtime-compiled CUDA kernels; the VJP is their matched adjoint."""
+
+    @staticmethod
+    def forward(ctx, image: torch.Tensor, projector: "BaseProjector") -> torch.Tensor:
+        ctx.projector = projector
+        return projector._kernel_forward(image)
+
+    @staticmethod
+    def backward(ctx, grad_sinogram: torch.Tensor):
+        # Through apply, so the gradient itself is differentiable (double backward).
+        return _KernelAdjoint.apply(grad_sinogram, ctx.projector), None
+
+
+class _KernelAdjoint(torch.autograd.Function):
+    """A^T y on the runtime-compiled CUDA kernels; the VJP is the kernel forward."""
+
+    @staticmethod
+    def forward(ctx, sinogram: torch.Tensor, projector: "BaseProjector") -> torch.Tensor:
+        ctx.projector = projector
+        return projector._kernel_adjoint(sinogram)
+
+    @staticmethod
+    def backward(ctx, grad_image: torch.Tensor):
+        return _KernelProject.apply(grad_image, ctx.projector), None
+
+
+class _KernelBackproject(torch.autograd.Function):
+    """FBP backprojection on the CUDA kernels; the VJP differentiates the PyTorch path."""
+
+    @staticmethod
+    def forward(ctx, sinogram: torch.Tensor, projector: "BaseProjector") -> torch.Tensor:
+        ctx.projector = projector
+        ctx.sino_shape = tuple(sinogram.shape)
+        return projector._kernel_backproject(sinogram)
+
+    @staticmethod
+    def backward(ctx, grad_image: torch.Tensor):
+        with torch.inference_mode(False), torch.enable_grad():
+            sino = torch.zeros(ctx.sino_shape, device=grad_image.device, dtype=grad_image.dtype, requires_grad=True)
+            recon = ctx.projector._backproject_eager(sino)
+            grad_sino = torch.autograd.grad(recon, sino, grad_image.contiguous())[0]
+        return grad_sino, None
+
+
+def _check_backend(backend: str, choices: tuple[str, ...]) -> str:
+    if backend not in choices:
+        raise ValueError(f"backend must be one of {choices}, got {backend!r}")
+    return backend
+
+
 class BaseProjector(nn.Module, ABC):
     """
     Abstract base class for CT projectors.
@@ -71,6 +123,9 @@ class BaseProjector(nn.Module, ABC):
         angles: torch.Tensor | None = None,
     ):
         super().__init__()
+        self.backend = "torch"
+        # Small float32 tables for the CUDA kernels, keyed by device; see _kernel_cached.
+        self._kernel_cache: dict = {}
         self.img_size = img_size
         self.n_det = n_det
         self.angle_range = angle_range
@@ -106,7 +161,44 @@ class BaseProjector(nn.Module, ABC):
     def _apply(self, fn, *args, **kwargs):
         result = super()._apply(fn, *args, **kwargs)
         self._set_angle_buffer(self.angles.device, self.angles.dtype)
+        self._kernel_cache = {}
         return result
+
+    def _use_kernels(self, tensor: torch.Tensor) -> bool:
+        """backend='cuda' on a float32 CUDA tensor with NVRTC available; else the PyTorch path."""
+        return self.backend == "cuda" and cuda_kernels_available(tensor.device, tensor.dtype)
+
+    def _kernel_cached(self, name: str, device: torch.device, build):
+        """Build a kernel table once per device, as ordinary tensors even under inference_mode."""
+        key = (name, device)
+        value = self._kernel_cache.get(key)
+        if value is None:
+            with torch.inference_mode(False), torch.no_grad():
+                value = build(device)
+            self._kernel_cache[key] = value
+        return value
+
+    def _kernel_trig(self, device: torch.device) -> torch.Tensor:
+        """[n_angles, 2] float32 (cos, sin), computed in float64 from the angle buffer."""
+
+        def build(device):
+            angles = self.angles.detach().to(device=device, dtype=torch.float64)
+            return torch.stack((torch.cos(angles), torch.sin(angles)), dim=-1).to(torch.float32).contiguous()
+
+        return self._kernel_cached("trig", device, build)
+
+    def _kernel_coords(self, device: torch.device) -> torch.Tensor:
+        """Pixel centres in normalised coordinates, as the eager grids use them."""
+        return self._kernel_cached(
+            "coords", device, lambda device: torch.linspace(-1, 1, self.img_size, dtype=torch.float32, device=device)
+        )
+
+    def _kernel_mask(self, device: torch.device) -> torch.Tensor | None:
+        if not getattr(self, "circle", False):
+            return None
+        return self._kernel_cached(
+            "mask", device, lambda device: self.circle_mask.detach().to(device=device, dtype=torch.float32).contiguous()
+        )
 
     def _angle_chunk_size(self, batch_size: int, work_items: int, device: torch.device) -> int:
         """Bound per-call tensor expansion while still batching angles."""
@@ -146,6 +238,8 @@ class BaseProjector(nn.Module, ABC):
         Parallel beam and fan beam on CPU and CUDA call grid_sample's input
         backward kernel directly. MPS and older PyTorch builds fall back to a
         throwaway forward VJP. Both paths work under no_grad() and inference_mode().
+        With backend='cuda' this is the gather kernel that transposes the CUDA
+        forward, which is then the operator it is the exact adjoint of.
 
         Args:
             sinogram: Sinogram of shape [B, 1, n_angles, n_det]
@@ -153,6 +247,8 @@ class BaseProjector(nn.Module, ABC):
         Returns:
             Adjoint image of shape [B, 1, img_size, img_size]
         """
+        if self._use_kernels(sinogram):
+            return _KernelAdjoint.apply(sinogram, self)
         return _DiscreteAdjoint.apply(sinogram, self)
 
     def backward(self, sinogram: torch.Tensor) -> torch.Tensor:
