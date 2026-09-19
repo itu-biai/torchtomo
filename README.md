@@ -116,6 +116,10 @@ that device. Computation stays on MPS without requiring CPU fallback.
 Geometry is fixed and must not change between evaluation and backpropagation;
 geometry gradients are not supported. Match projector and input device/dtype.
 
+`ParallelBeam(..., sparse_adjoint=True)` builds a CSR matrix of the forward map
+once and applies its transpose with a sparse-dense product. Off by default: the
+matrix is hundreds of megabytes at 512 px with 90 angles.
+
 `ParallelBeam(..., grid_cache_bytes=...)` bounds how much of the per-angle
 sampling grids stay resident. The default 256 MB holds a 512 px, 90 angle
 forward grid (189 MB) and keeps a 512 px, 360 angle projector in the hundreds

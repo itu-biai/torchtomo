@@ -31,6 +31,7 @@ class ParallelBeam(BaseProjector):
         angle_range: tuple[float, float] = (0, np.pi),
         circle: bool = True,
         grid_cache_bytes: int = 256 << 20,
+        sparse_adjoint: bool = False,
     ):
         """
         Initialize parallel beam projector.
@@ -52,6 +53,10 @@ class ParallelBeam(BaseProjector):
                 time. Raise the budget above the grid size if that memory is free;
                 do not raise the default, it comes out of LPD's headroom on an
                 11 GB card.
+            sparse_adjoint: If True, build a CSR matrix of the forward map and
+                apply its transpose with a sparse-dense product. Off by default:
+                the matrix is hundreds of megabytes at 512 px / 90 angles and
+                does not fit comfortably at 512 px / 360 angles on an 11 GB card.
         """
         n_det = n_det or img_size
         super().__init__(img_size, n_angles, n_det, angle_range)
@@ -65,6 +70,8 @@ class ParallelBeam(BaseProjector):
         # and materialising them costs [n_angles, H, W, 2] floats twice over: 1.5 GB at
         # 512 px and 360 angles. They are rebuilt per chunk instead.
         self.grid_cache_bytes = grid_cache_bytes
+        self.sparse_adjoint = sparse_adjoint
+        self._sparse_adjoint_matrix = None
         self._grid_cache: dict = {}
         self._grid_cache_used = 0
         self._set_coordinate_buffers(self.angles.device, self.angles.dtype)
@@ -136,9 +143,94 @@ class ParallelBeam(BaseProjector):
         # A cached grid belongs to the device and dtype it was built on.
         self._grid_cache = {}
         self._grid_cache_used = 0
+        self._sparse_adjoint_matrix = None
         result = super()._apply(fn, *args, **kwargs)
         self._set_coordinate_buffers(self.angles.device, self.angles.dtype)
         return result
+
+    def _csr_chunk(self, start: int, end: int) -> torch.Tensor:
+        """Forward-map CSR for one angle chunk, rows (end-start)*n_det, from `_forward_grid`."""
+        size = self.img_size
+        n_det = self.n_det
+        grid = self._forward_grid(start, end)
+        angle_count, height, width, _ = grid.shape
+        gx, gy = grid.unbind(-1)
+        xs = (gx + 1) * (size - 1) / 2
+        ys = (gy + 1) * (size - 1) / 2
+        x0 = xs.floor().long()
+        y0 = ys.floor().long()
+        dx = xs - x0.to(xs.dtype)
+        dy = ys - y0.to(ys.dtype)
+        a_idx = torch.arange(angle_count, device=grid.device).view(-1, 1, 1).expand(angle_count, height, width)
+        w_idx = torch.arange(width, device=grid.device).view(1, 1, -1).expand(angle_count, height, width)
+        rows = a_idx * n_det + w_idx
+        corners = (
+            (x0, y0, (1 - dx) * (1 - dy)),
+            (x0 + 1, y0, dx * (1 - dy)),
+            (x0, y0 + 1, (1 - dx) * dy),
+            (x0 + 1, y0 + 1, dx * dy),
+        )
+        row_parts, col_parts, val_parts = [], [], []
+        mask = self.circle_mask if self.circle else None
+        for ix, iy, weight in corners:
+            valid = (ix >= 0) & (ix < size) & (iy >= 0) & (iy < size)
+            if mask is not None:
+                inside = mask[iy.clamp(0, size - 1), ix.clamp(0, size - 1)] > 0
+                valid = valid & inside
+            if not valid.any():
+                continue
+            row_parts.append(rows[valid])
+            col_parts.append((iy * size + ix)[valid])
+            val_parts.append((weight * self.pixel_size)[valid])
+        nrows = angle_count * n_det
+        ncols = size * size
+        if not row_parts:
+            crow = torch.zeros(nrows + 1, device=grid.device, dtype=torch.int64)
+            col = torch.zeros(0, device=grid.device, dtype=torch.int64)
+            val = torch.zeros(0, device=grid.device, dtype=grid.dtype)
+            return torch.sparse_csr_tensor(crow, col, val, (nrows, ncols))
+        coo = torch.sparse_coo_tensor(
+            torch.stack([torch.cat(row_parts), torch.cat(col_parts)]),
+            torch.cat(val_parts),
+            (nrows, ncols),
+        ).coalesce()
+        return coo.to_sparse_csr()
+
+    def _build_sparse_forward(self) -> torch.Tensor:
+        """CSR of A^T, rows pixels, built from angle-major forward chunks then transposed."""
+        if self.n_det != self.img_size:
+            raise ValueError("sparse_adjoint requires n_det == img_size")
+        chunk = min(8, self.n_angles)
+        parts = [self._csr_chunk(start, min(start + chunk, self.n_angles)) for start in range(0, self.n_angles, chunk)]
+        values = torch.cat([part.values() for part in parts])
+        cols = torch.cat([part.col_indices() for part in parts])
+        crows = []
+        nnz = 0
+        for part in parts:
+            crow = part.crow_indices()
+            crows.append(crow[:-1] + nnz)
+            nnz += int(crow[-1].item())
+        index_dtype = torch.int32 if nnz < (1 << 31) and self.img_size * self.img_size < (1 << 31) else torch.int64
+        crow = torch.cat(crows + [torch.tensor([nnz], device=cols.device, dtype=crow.dtype)]).to(index_dtype)
+        cols = cols.to(index_dtype)
+        nrows = self.n_angles * self.n_det
+        ncols = self.img_size * self.img_size
+        forward = torch.sparse_csr_tensor(crow, cols, values, (nrows, ncols))
+        # CSR @ dense is the fast product; A.t() is CSC and is as slow as dense @ CSR.
+        adjoint = forward.t().to_sparse_csr()
+        if index_dtype == torch.int32:
+            adjoint = torch.sparse_csr_tensor(
+                adjoint.crow_indices().to(torch.int32),
+                adjoint.col_indices().to(torch.int32),
+                adjoint.values(),
+                adjoint.shape,
+            )
+        return adjoint
+
+    def _ensure_sparse_adjoint_matrix(self) -> torch.Tensor:
+        if self._sparse_adjoint_matrix is None:
+            self._sparse_adjoint_matrix = self._build_sparse_forward()
+        return self._sparse_adjoint_matrix
 
     def _direct_adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
         """A^T y by calling grid_sample's input backward, skipping a throwaway forward.
@@ -147,6 +239,9 @@ class ParallelBeam(BaseProjector):
         operator is linear, so the image gradient does not depend on the image.
         """
         batch = sinogram.shape[0]
+        if self.sparse_adjoint:
+            matrix = self._ensure_sparse_adjoint_matrix()
+            return (matrix @ sinogram.reshape(batch, -1).t()).t().reshape(batch, 1, self.img_size, self.img_size)
         size = self.img_size
         chunk = self._angle_chunk_size(batch, size * size, sinogram.device)
         out = torch.zeros(1, batch, size, size, device=sinogram.device, dtype=sinogram.dtype)

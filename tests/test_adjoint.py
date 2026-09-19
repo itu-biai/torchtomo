@@ -221,6 +221,44 @@ def test_fanbeam_adjoint_keeps_the_vjp(monkeypatch):
     assert calls["n"] == 0
 
 
+def test_sparse_adjoint_matches_eager_and_inner_product():
+    """Opt-in CSR adjoint matches the eager adjoint and the shipped inner-product identity."""
+    from torchtomo.base import _vjp_adjoint
+
+    torch.manual_seed(23)
+    eager = ParallelBeam(img_size=16, n_angles=11, angle_range=(0.13, 2.71), circle=True).double()
+    sparse = ParallelBeam(img_size=16, n_angles=11, angle_range=(0.13, 2.71), circle=True, sparse_adjoint=True).double()
+    x = torch.randn(3, 1, 16, 16, dtype=torch.float64)
+    y = torch.randn(3, 1, sparse.n_angles, sparse.n_det, dtype=torch.float64)
+    y = y.transpose(-1, -2).contiguous().transpose(-1, -2)
+    actual = sparse.adjoint(y)
+    torch.testing.assert_close(actual, eager.adjoint(y))
+    torch.testing.assert_close(actual, _vjp_adjoint(eager, y))
+    torch.testing.assert_close(sparse.backward(y), actual)
+    ax, aty = sparse.forward(x), sparse.adjoint(y)
+    lhs = (ax * y).flatten(1).sum(1)
+    rhs = (x * aty).flatten(1).sum(1)
+    scale = ax.flatten(1).norm(dim=1) * y.flatten(1).norm(dim=1)
+    scale = scale + x.flatten(1).norm(dim=1) * aty.flatten(1).norm(dim=1)
+    assert torch.all((lhs - rhs).abs() <= 10 * torch.finfo(torch.float64).eps * scale)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_sparse_adjoint_matches_eager_cuda():
+    torch.manual_seed(24)
+    eager = ParallelBeam(img_size=8, n_angles=6, circle=False).to("cuda")
+    sparse = ParallelBeam(img_size=8, n_angles=6, circle=False, sparse_adjoint=True).to("cuda")
+    y = torch.randn(2, 1, 6, 8, device="cuda")
+    torch.testing.assert_close(sparse.adjoint(y), eager.adjoint(y), rtol=2e-5, atol=2e-6)
+
+
+def test_sparse_adjoint_gradcheck():
+    torch.manual_seed(25)
+    projector = ParallelBeam(img_size=3, n_angles=5, circle=False, sparse_adjoint=True).double()
+    y = torch.randn(1, 1, projector.n_angles, projector.n_det, dtype=torch.float64, requires_grad=True)
+    assert torch.autograd.gradcheck(projector.backward, (y,))
+
+
 def test_float64_coordinates_are_rebuilt_not_promoted():
     size, n_angles = 8, 7
     angle_range = (0.13, 2.71)
