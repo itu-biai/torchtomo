@@ -74,17 +74,19 @@ keeps only per-ray tables on the GPU (6 MB at 512 px and 360 angles, against
 2.2 GB of sampling grids for the PyTorch path). Float64, CPU, and MPS tensors
 fall back to the PyTorch path, as does a CUDA build without NVRTC.
 
-512 x 512, batch 4, RTX 2080 Ti, milliseconds for forward / adjoint / FBP:
+512 x 512, batch 4, RTX 2080 Ti, milliseconds for forward / adjoint / FBP,
+all measured in one process:
 
-| Geometry, angles | `backend="torch"` | `backend="cuda"` | LEAP | torch-radon |
-| --- | --- | --- | --- | --- |
-| parallel, 360 | 19.3 / 37.2 / 14.3 | 2.2 / 2.0 / 0.6 | 2.6 / 1.7 / 7.5 | 0.7 / 0.6 / |
-| parallel, 90 | 3.3 / 8.1 / 3.1 | 0.6 / 0.5 / 0.2 | 1.1 / 0.6 / 3.4 | 0.2 / 0.2 / |
-| fan, 360 | 16.2 / 51.2 / 14.9 | 2.7 / 3.1 / 1.1 | 4.9 / 3.5 / 17.3 | 1.4 / 0.8 / |
-| fan, 90 | 4.0 / 12.8 / 3.8 | 0.7 / 0.8 / 0.3 | 2.0 / 1.1 / 5.9 | 0.4 / 0.2 / |
+| Geometry, angles | `torch` | `cuda` | `cuda`, approximate | LEAP | torch-radon |
+| --- | --- | --- | --- | --- | --- |
+| parallel, 360 | 18.0 / 38.3 / 14.3 | 2.3 / 2.1 / 0.6 | 1.0 / 0.5 / 0.6 | 2.7 / 1.7 / 7.8 | 0.7 / 0.6 / 0.9 |
+| parallel, 90 | 3.3 / 8.4 / 3.1 | 0.6 / 0.5 / 0.2 | 0.3 / 0.1 / 0.2 | 1.1 / 0.6 / 3.5 | 0.2 / 0.2 / 0.2 |
+| fan, 360 | 16.2 / 53.0 / 14.9 | 2.8 / 3.2 / 1.1 | 1.3 / 0.8 / 1.1 | 5.0 / 3.6 / 17.5 | 2.0 / 1.1 / 1.6 |
+| fan, 90 | 4.1 / 13.1 / 3.8 | 0.7 / 0.8 / 0.3 | 0.4 / 0.2 / 0.3 | 2.0 / 1.1 / 6.1 | 0.4 / 0.2 / 0.3 |
 
-torch-radon uses the GPU's texture units, whose 8-bit interpolation weights are
-fast but not exact; its FBP was not timed on the same filter.
+torch-radon samples through the GPU's texture units, whose 8-bit interpolation
+weights are fast but not exact, and its adjoint is a pixel-driven backprojection
+rather than the transpose of its forward.
 
 `backend="cuda", approximate=True` makes the same trade: the forward samples
 through the texture units (about 1e-4 relative difference from the exact

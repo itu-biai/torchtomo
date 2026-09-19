@@ -169,44 +169,12 @@ __device__ void parallel_adjoint(const float* __restrict__ sino, const float2* _
             const int wb = (int)floorf(us - TT_SQRT2_MARGIN) + 1;
             const int hb = (int)floorf(vs - TT_SQRT2_MARGIN) + 1;
             const float* row = sino + (size_t)a * S * C;
-#ifdef TT_PARALLEL_INTERVAL
-            const float isn = fabsf(sn) > 1e-6f ? __frcp_rn(sn) : 0.f;
-            const float ics = fabsf(cs) > 1e-6f ? __frcp_rn(cs) : 0.f;
-#endif
 #pragma unroll
             for (int dw = 0; dw < 3; ++dw) {
                 const int w = wb + dw;
                 if (w < 0 || w >= S) continue;
                 const float u = (float)w - c;
                 float kw = 0.f;
-#ifdef TT_PARALLEL_INTERVAL
-                // Rows where both tents can be nonzero: |cos du + sin dv| < 1 and
-                // |cos dv - sin du| < 1 for du = w - u*, dv = h - v*, widened by slack.
-                const float du = (float)w - us;
-                float lo = -1e30f, hi = 1e30f;
-                const float reach = 1.f + TT_WINDOW_SLACK;
-                if (isn != 0.f) {
-                    const float t0 = (-reach - cs * du) * isn, t1 = (reach - cs * du) * isn;
-                    lo = fmaxf(lo, fminf(t0, t1));
-                    hi = fminf(hi, fmaxf(t0, t1));
-                } else if (fabsf(cs * du) >= reach) {
-                    continue;
-                }
-                if (ics != 0.f) {
-                    const float t0 = (-reach + sn * du) * ics, t1 = (reach + sn * du) * ics;
-                    lo = fmaxf(lo, fminf(t0, t1));
-                    hi = fminf(hi, fmaxf(t0, t1));
-                } else if (fabsf(sn * du) >= reach) {
-                    continue;
-                }
-                const int h_lo = max(max(hb, 0), (int)ceilf(vs + lo));
-                const int h_hi = min(min(hb + 2, S - 1), (int)floorf(vs + hi));
-                for (int h = h_lo; h <= h_hi; ++h) {
-                    float px, py;
-                    parallel_point(cs, sn, c, u, (float)h - c, px, py);
-                    kw += tent_as_forward(px, jf) * tent_as_forward(py, iff);
-                }
-#else
 #pragma unroll
                 for (int dh = 0; dh < 3; ++dh) {
                     const int h = hb + dh;
@@ -215,7 +183,6 @@ __device__ void parallel_adjoint(const float* __restrict__ sino, const float2* _
                     parallel_point(cs, sn, c, u, (float)h - c, px, py);
                     kw += tent_as_forward(px, jf) * tent_as_forward(py, iff);
                 }
-#endif
                 if (kw != 0.f) {
                     float y[C];
                     fetch<C>(row, w, y);
