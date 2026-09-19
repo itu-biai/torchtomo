@@ -14,7 +14,7 @@ import warnings
 
 import torch
 
-from ._nvrtc import KernelLibrary, runtime_available, runtime_unavailable_reason
+from ._nvrtc import TEXTURE_PITCH_BYTES, KernelLibrary, Texture2D, runtime_available, runtime_unavailable_reason
 
 _SOURCE = "_cuda_kernels.cu"
 _FORWARD_TILE = 4  # detector bins per warp; TT_FORWARD_TW in the source
@@ -25,6 +25,8 @@ _FAN_ADJOINT_ROWS = 2  # pixels per thread; TT_FAN_ROWS in the source
 # groups of four; the gathers are bound by their index arithmetic and share it.
 _FORWARD_GROUP = 4
 _GATHER_GROUP = 8
+# Textures hold at most four channels.
+_TEXTURE_GROUP = 4
 
 _library: KernelLibrary | None = None
 _warned: set[str] = set()
@@ -256,6 +258,132 @@ def fan_backproject(
                 src,
                 det,
                 half_width,
+                count,
+                size * size,
+                scale,
+            ],
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------------
+# Approximate mode: texture-sampled forwards and pixel-driven adjoints.
+# ---------------------------------------------------------------------------------
+
+
+def _texture(cache: dict, device: torch.device, slot: int, size: int, width: int) -> Texture2D:
+    """A persistent image texture for one channel group of the batch.
+
+    The storage is reused call after call, so the texture object is created once;
+    rows are padded to the pitch alignment and the padding stays zero.
+    """
+    key = ("texture", device, slot, width)
+    texture = cache.get(key)
+    if texture is None or texture.storage.shape[0] != size:
+        unit = max(1, TEXTURE_PITCH_BYTES // (4 * width))
+        pitch = -(-size // unit) * unit
+        with torch.inference_mode(False):
+            storage = torch.zeros(size, pitch, width, device=device, dtype=torch.float32)
+        texture = Texture2D(storage, size)
+        cache[key] = texture
+    return texture
+
+
+def _load_texture(texture: Texture2D, images: torch.Tensor, mask: torch.Tensor | None) -> None:
+    """Write [count, S, S] images, masked, into the texture's first channels."""
+    count, size = images.shape[0], images.shape[-1]
+    view = texture.storage[:, :size, :count]
+    source = images.permute(1, 2, 0)
+    if mask is not None:
+        torch.mul(source, mask.view(size, size, 1), out=view)
+    else:
+        view.copy_(source)
+
+
+def parallel_forward_texture(
+    image: torch.Tensor, trig: torch.Tensor, mask: torch.Tensor | None, pixel_size: float, cache: dict
+) -> torch.Tensor:
+    batch, size = image.shape[0], image.shape[-1]
+    n_angles = trig.shape[0]
+    images = image.reshape(batch, size, size)
+    mask = _flat_mask(mask)
+    out = image.new_empty(batch, 1, n_angles, size)
+    c = 0.5 * (size - 1)
+    r2 = (c + 2.0) ** 2 if mask is not None else 1e30
+    grid = (math.ceil(size / (_FORWARD_TILE * _FORWARD_WARPS)), n_angles, 1)
+    block = (32 * _FORWARD_WARPS, 1, 1)
+    library = _kernels()
+    for slot, (start, count, width) in enumerate(_groups(batch, _TEXTURE_GROUP)):
+        texture = _texture(cache, image.device, slot, size, width)
+        _load_texture(texture, images[start : start + count], mask)
+        kernel = library.function(f"parallel_forward_texture_c{width}", image.device)
+        kernel(grid, block, [texture, trig, out[start], size, n_angles, count, n_angles * size, pixel_size, r2])
+    return out
+
+
+def fan_forward_texture(
+    image: torch.Tensor,
+    rays: torch.Tensor,
+    weights: torch.Tensor,
+    mask: torch.Tensor | None,
+    n_angles: int,
+    n_det: int,
+    n_samples: int,
+    cache: dict,
+) -> torch.Tensor:
+    batch, size = image.shape[0], image.shape[-1]
+    images = image.reshape(batch, size, size)
+    mask = _flat_mask(mask)
+    out = image.new_empty(batch, 1, n_angles, n_det)
+    grid = (math.ceil(n_det / (_FORWARD_TILE * _FORWARD_WARPS)), n_angles, 1)
+    block = (32 * _FORWARD_WARPS, 1, 1)
+    library = _kernels()
+    for slot, (start, count, width) in enumerate(_groups(batch, _TEXTURE_GROUP)):
+        texture = _texture(cache, image.device, slot, size, width)
+        _load_texture(texture, images[start : start + count], mask)
+        kernel = library.function(f"fan_forward_texture_c{width}", image.device)
+        kernel(
+            grid,
+            block,
+            [texture, rays, weights, out[start], size, n_angles, n_det, n_samples, count, n_angles * n_det],
+        )
+    return out
+
+
+def fan_adjoint_pixel(
+    sinogram: torch.Tensor,
+    views: torch.Tensor,
+    mask: torch.Tensor | None,
+    size: int,
+    alpha: float,
+    beta: float,
+    span: float,
+    spacing: float,
+    scale: float,
+) -> torch.Tensor:
+    batch, _, n_angles, n_det = sinogram.shape
+    flat = sinogram.reshape(batch, n_angles * n_det)
+    mask = _flat_mask(mask)
+    out = sinogram.new_empty(batch, 1, size, size)
+    library = _kernels()
+    for start, count, width in _groups(batch, _GATHER_GROUP):
+        packed = _pack(flat, start, count, width)
+        kernel = library.function(f"fan_adjoint_pixel_c{width}", sinogram.device)
+        kernel(
+            _gather_grid(size),
+            _GATHER_BLOCK,
+            [
+                packed,
+                views,
+                mask,
+                out[start],
+                size,
+                n_angles,
+                n_det,
+                alpha,
+                beta,
+                span,
+                spacing,
                 count,
                 size * size,
                 scale,

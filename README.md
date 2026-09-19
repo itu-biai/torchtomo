@@ -86,6 +86,12 @@ fall back to the PyTorch path, as does a CUDA build without NVRTC.
 torch-radon uses the GPU's texture units, whose 8-bit interpolation weights are
 fast but not exact; its FBP was not timed on the same filter.
 
+`backend="cuda", approximate=True` makes the same trade: the forward samples
+through the texture units (about 1e-4 relative difference from the exact
+forward at 256 px) and the adjoint becomes a pixel-driven backprojection (about
+1% from the exact adjoint). They are no longer each other's exact transpose, so
+the default stays exact.
+
 ## Differentiable Optimization Example
 
 ```python

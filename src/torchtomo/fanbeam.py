@@ -51,6 +51,7 @@ class FanBeam(BaseProjector):
         circle: bool = True,
         angles: Optional[torch.Tensor] = None,
         backend: str = "torch",
+        approximate: bool = False,
     ):
         """
         Initialize fan beam projector.
@@ -76,6 +77,12 @@ class FanBeam(BaseProjector):
                 on the device and builds the PyTorch path's grids (about 2.2 GB
                 at 512 px, 360 angles) only if that path is ever used, e.g. on
                 the CPU or in float64.
+            approximate: With backend="cuda", sample the image through the GPU's
+                texture units (hardware bilinear interpolation with 8-bit weights,
+                about 3e-4 relative error) and use a pixel-driven adjoint (linear
+                interpolation on the detector with the fan's ray-spacing weight).
+                Faster, but the forward and adjoint are no longer each other's
+                exact transpose. Off by default.
         """
         src_dist = float(2 * img_size if src_dist is None else src_dist)
         det_dist = float(2 * img_size if det_dist is None else det_dist)
@@ -83,6 +90,11 @@ class FanBeam(BaseProjector):
         n_samples = int(img_size if n_samples is None else n_samples)
         super().__init__(img_size, n_angles, n_det, angle_range, angles=angles)
         self.backend = _check_backend(backend, ("torch", "cuda"))
+        if approximate and self.backend != "cuda":
+            raise ValueError("approximate=True needs backend='cuda'")
+        if approximate and n_samples < 2:
+            raise ValueError("approximate=True needs at least two samples per ray")
+        self.approximate = approximate
 
         self.src_dist = src_dist
         self.det_dist = det_dist
@@ -159,13 +171,29 @@ class FanBeam(BaseProjector):
 
     def _kernel_forward(self, x: torch.Tensor) -> torch.Tensor:
         rays, _, weights, _ = self._kernel_rays(x.device)
-        return _cuda_kernels.fan_forward(
-            x, rays, weights, self._kernel_mask(x.device), self.n_angles, self.n_det, self.n_samples
-        )
+        mask = self._kernel_mask(x.device)
+        if self.approximate:
+            return _cuda_kernels.fan_forward_texture(
+                x, rays, weights, mask, self.n_angles, self.n_det, self.n_samples, self._kernel_cache
+            )
+        return _cuda_kernels.fan_forward(x, rays, weights, mask, self.n_angles, self.n_det, self.n_samples)
 
     def _kernel_adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
         rays, inv_steps, weights, views = self._kernel_rays(sinogram.device)
         alpha = (self._src_dist_norm + self._det_dist_norm) * (self.n_det - 1) / self._det_width_norm
+        if self.approximate:
+            centre = (self.img_size - 1) / 2
+            return _cuda_kernels.fan_adjoint_pixel(
+                sinogram,
+                views,
+                self._kernel_mask(sinogram.device),
+                self.img_size,
+                alpha,
+                (self.n_det - 1) / 2,
+                (self._src_dist_norm + self._det_dist_norm) * centre,
+                self._det_width_norm / (self.n_det - 1) * centre,
+                (self.n_samples - 1) / (self.n_samples * centre),
+            )
         return _cuda_kernels.fan_adjoint(
             sinogram,
             rays,

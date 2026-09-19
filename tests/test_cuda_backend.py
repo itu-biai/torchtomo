@@ -204,3 +204,43 @@ def test_compiled_kernels_are_cached_on_disk(tmp_path, monkeypatch):
     assert second.last_from_cache is True
     torch.cuda.synchronize()
     assert torch.all(out == 4.0)
+
+
+@pytest.mark.parametrize("cls", [ParallelBeam, FanBeam])
+def test_approximate_mode_is_close_to_the_exact_pair(cls):
+    """Texture forward within 1e-3 of the exact one; pixel-driven adjoint within a few percent."""
+    _require_kernels()
+    from torchtomo import shepp_logan
+
+    exact = cls(img_size=128, n_angles=60, backend="cuda").cuda()
+    approx = cls(img_size=128, n_angles=60, backend="cuda", approximate=True).cuda()
+    phantom = shepp_logan(128, device="cuda")
+    for batch in (1, 2, 3, 5):
+        x = phantom.repeat(batch, 1, 1, 1) * torch.linspace(0.5, 1.5, batch, device="cuda").view(-1, 1, 1, 1)
+        with torch.no_grad():
+            f_exact, f_approx = exact.forward(x), approx.forward(x)
+            # A smooth sinogram, where interpolation models agree up to their kernels.
+            a_exact, a_approx = exact.adjoint(f_exact), approx.adjoint(f_exact)
+        assert ((f_approx - f_exact).norm() / f_exact.norm()) < 1e-3
+        assert ((a_approx - a_exact).norm() / a_exact.norm()) < 0.03
+        for k in range(batch):
+            assert ((f_approx[k] - f_exact[k]).norm() / f_exact[k].norm()) < 1e-3
+
+
+@pytest.mark.parametrize("cls", [ParallelBeam, FanBeam])
+def test_approximate_mode_gradients(cls):
+    _require_kernels()
+    projector = cls(img_size=32, n_angles=12, backend="cuda", approximate=True).cuda()
+    x = torch.rand(3, 1, 32, 32, device="cuda", requires_grad=True)
+    g = torch.randn(3, 1, 12, projector.n_det, device="cuda")
+    (grad,) = torch.autograd.grad(projector.forward(x), x, g)
+    torch.testing.assert_close(grad, projector.adjoint(g))
+
+
+def test_approximate_mode_is_validated():
+    with pytest.raises(ValueError):
+        ParallelBeam(img_size=8, n_angles=4, approximate=True)
+    with pytest.raises(ValueError):
+        FanBeam(img_size=8, n_angles=4, approximate=True)
+    with pytest.raises(ValueError):
+        FanBeam(img_size=8, n_angles=4, backend="cuda", approximate=True, n_samples=1)

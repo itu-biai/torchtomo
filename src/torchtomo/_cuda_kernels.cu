@@ -15,6 +15,9 @@
 // weight is bit-identical and <A x, y> = <x, A^T y> holds to float32 roundoff.
 
 #define TT_SQRT2_MARGIN 1.4152f
+// Sample windows are widened by this many pixels, far beyond the rounding of a
+// sample coordinate (half an ulp: 3e-5 px at 512 px).
+#define TT_WINDOW_SLACK 1e-3f
 
 template <int C>
 __device__ __forceinline__ void fetch(const float* __restrict__ base, int index, float (&out)[C])
@@ -166,12 +169,44 @@ __device__ void parallel_adjoint(const float* __restrict__ sino, const float2* _
             const int wb = (int)floorf(us - TT_SQRT2_MARGIN) + 1;
             const int hb = (int)floorf(vs - TT_SQRT2_MARGIN) + 1;
             const float* row = sino + (size_t)a * S * C;
+#ifdef TT_PARALLEL_INTERVAL
+            const float isn = fabsf(sn) > 1e-6f ? __frcp_rn(sn) : 0.f;
+            const float ics = fabsf(cs) > 1e-6f ? __frcp_rn(cs) : 0.f;
+#endif
 #pragma unroll
             for (int dw = 0; dw < 3; ++dw) {
                 const int w = wb + dw;
                 if (w < 0 || w >= S) continue;
                 const float u = (float)w - c;
                 float kw = 0.f;
+#ifdef TT_PARALLEL_INTERVAL
+                // Rows where both tents can be nonzero: |cos du + sin dv| < 1 and
+                // |cos dv - sin du| < 1 for du = w - u*, dv = h - v*, widened by slack.
+                const float du = (float)w - us;
+                float lo = -1e30f, hi = 1e30f;
+                const float reach = 1.f + TT_WINDOW_SLACK;
+                if (isn != 0.f) {
+                    const float t0 = (-reach - cs * du) * isn, t1 = (reach - cs * du) * isn;
+                    lo = fmaxf(lo, fminf(t0, t1));
+                    hi = fminf(hi, fmaxf(t0, t1));
+                } else if (fabsf(cs * du) >= reach) {
+                    continue;
+                }
+                if (ics != 0.f) {
+                    const float t0 = (-reach + sn * du) * ics, t1 = (reach + sn * du) * ics;
+                    lo = fmaxf(lo, fminf(t0, t1));
+                    hi = fminf(hi, fmaxf(t0, t1));
+                } else if (fabsf(sn * du) >= reach) {
+                    continue;
+                }
+                const int h_lo = max(max(hb, 0), (int)ceilf(vs + lo));
+                const int h_hi = min(min(hb + 2, S - 1), (int)floorf(vs + hi));
+                for (int h = h_lo; h <= h_hi; ++h) {
+                    float px, py;
+                    parallel_point(cs, sn, c, u, (float)h - c, px, py);
+                    kw += tent_as_forward(px, jf) * tent_as_forward(py, iff);
+                }
+#else
 #pragma unroll
                 for (int dh = 0; dh < 3; ++dh) {
                     const int h = hb + dh;
@@ -180,6 +215,7 @@ __device__ void parallel_adjoint(const float* __restrict__ sino, const float2* _
                     parallel_point(cs, sn, c, u, (float)h - c, px, py);
                     kw += tent_as_forward(px, jf) * tent_as_forward(py, iff);
                 }
+#endif
                 if (kw != 0.f) {
                     float y[C];
                     fetch<C>(row, w, y);
@@ -331,7 +367,6 @@ __device__ void fan_forward(const float* __restrict__ img, const float4* __restr
 // this axis. The window only has to be conservative: the exact forward weights are
 // evaluated inside it, and the slack exceeds the rounding of p0 + k s (half an ulp
 // of the coordinate, 3e-5 px at 512 px) by a wide margin.
-#define TT_WINDOW_SLACK 1e-3f
 __device__ __forceinline__ void sample_window(float p0, float inv, float q, float& lo, float& hi)
 {
     const float reach = 1.f + TT_WINDOW_SLACK;
@@ -580,3 +615,206 @@ TT_FAN(1)
 TT_FAN(2)
 TT_FAN(4)
 TT_FAN(8)
+
+// ---------------------------------------------------------------------------------
+// Approximate mode (approximate=True). The forwards sample through the texture
+// units: hardware bilinear interpolation with 8-bit fractional weights, about 3e-4
+// relative error, one fetch for up to four images. The adjoints are pixel-driven:
+// linear interpolation on the detector, the continuum limit of the exact gather.
+// Both are fast, but they are not each other's exact transpose.
+// ---------------------------------------------------------------------------------
+
+typedef unsigned long long tt_texture;
+
+template <int C>
+__device__ __forceinline__ void texel_add(tt_texture tex, float px, float py, float (&acc)[C])
+{
+    // Texel centres sit at +0.5 in unnormalised coordinates; the border reads as zero.
+    if constexpr (C == 1) {
+        acc[0] += tex2D<float>(tex, px + 0.5f, py + 0.5f);
+    } else if constexpr (C == 2) {
+        const float2 t = tex2D<float2>(tex, px + 0.5f, py + 0.5f);
+        acc[0] += t.x;
+        acc[1] += t.y;
+    } else {
+        const float4 t = tex2D<float4>(tex, px + 0.5f, py + 0.5f);
+        acc[0] += t.x;
+        acc[1] += t.y;
+        acc[2] += t.z;
+        acc[3] += t.w;
+    }
+}
+
+template <int C, int TW>
+__device__ void parallel_forward_texture(tt_texture tex, const float2* __restrict__ trig, float* __restrict__ out,
+                                         int S, int A, int nb, int plane, float scale, float r2)
+{
+    constexpr int TH = 32 / TW;
+    const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+    const int lw = lane % TW, lh = lane / TW;
+    const int a = blockIdx.y;
+    const int w_first = (blockIdx.x * (blockDim.x >> 5) + warp) * TW;
+    if (w_first >= S) return;
+    const int w = w_first + lw;
+    const float c = 0.5f * (float)(S - 1);
+    const float2 t = trig[a];
+    const float cs = t.x, sn = t.y;
+    const float u = (float)w - c;
+    const float u_lo = (float)w_first - c, u_hi = (float)min(w_first + TW - 1, S - 1) - c;
+    const float u_min = (u_lo <= 0.f && u_hi >= 0.f) ? 0.f : fminf(fabsf(u_lo), fabsf(u_hi));
+    int h0 = 0, h1 = S - 1;
+    const float room = r2 - u_min * u_min;
+    if (room < 0.f) {
+        h1 = -1;
+    } else if (room < c * c * 4.f) {
+        const float e = sqrtf(room);
+        h0 = max(0, (int)floorf(c - e));
+        h1 = min(S - 1, (int)ceilf(c + e));
+    }
+    float acc[C];
+#pragma unroll
+    for (int k = 0; k < C; ++k) acc[k] = 0.f;
+    if (w < S) {
+        for (int h = h0 + lh; h <= h1; h += TH) {
+            float px, py;
+            parallel_point(cs, sn, c, u, (float)h - c, px, py);
+            texel_add<C>(tex, px, py, acc);
+        }
+    }
+#pragma unroll
+    for (int offset = TW; offset < 32; offset <<= 1) {
+#pragma unroll
+        for (int k = 0; k < C; ++k) acc[k] += __shfl_xor_sync(0xffffffffu, acc[k], offset);
+    }
+    if (lh == 0 && w < S) {
+        float* o = out + (size_t)a * S + w;
+#pragma unroll
+        for (int k = 0; k < C; ++k)
+            if (k < nb) o[(size_t)k * plane] = acc[k] * scale;
+    }
+}
+
+template <int C, int TW>
+__device__ void fan_forward_texture(tt_texture tex, const float4* __restrict__ rays,
+                                    const float* __restrict__ ray_weight, float* __restrict__ out, int S, int A,
+                                    int n_det, int n_samples, int nb, int plane)
+{
+    constexpr int TH = 32 / TW;
+    const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+    const int lw = lane % TW, lh = lane / TW;
+    const int a = blockIdx.y;
+    const int d_first = (blockIdx.x * (blockDim.x >> 5) + warp) * TW;
+    if (d_first >= n_det) return;
+    const int d = d_first + lw;
+    float acc[C];
+#pragma unroll
+    for (int k = 0; k < C; ++k) acc[k] = 0.f;
+    float weight = 0.f;
+    if (d < n_det) {
+        const size_t r = (size_t)a * n_det + d;
+        weight = ray_weight[r];
+        if (weight != 0.f) {
+            const float4 ray = rays[r];
+            for (int k = lh; k < n_samples; k += TH) {
+                float px, py;
+                fan_point(ray, (float)k, px, py);
+                texel_add<C>(tex, px, py, acc);
+            }
+        }
+    }
+#pragma unroll
+    for (int offset = TW; offset < 32; offset <<= 1) {
+#pragma unroll
+        for (int k = 0; k < C; ++k) acc[k] += __shfl_xor_sync(0xffffffffu, acc[k], offset);
+    }
+    if (lh == 0 && d < n_det) {
+        float* o = out + (size_t)a * n_det + d;
+#pragma unroll
+        for (int k = 0; k < C; ++k)
+            if (k < nb) o[(size_t)k * plane] = acc[k] * weight;
+    }
+}
+
+// Pixel-driven fan adjoint. Summed over a ray's samples, a pixel's bilinear tent
+// integrates to 1 / (sample spacing); summed over neighbouring rays it becomes linear
+// interpolation at the pixel's bin, divided by the rays' perpendicular spacing there,
+// spacing * depth / D * cos(gamma). A ray's weight over its sample spacing is the
+// same for every ray, (n - 1) / (n c), and arrives in `scale`. Lengths are in the
+// kernels' pixel units: span is source to detector, spacing the bin pitch.
+template <int C>
+__device__ void fan_adjoint_pixel(const float* __restrict__ sino, const float4* __restrict__ views,
+                                  const float* __restrict__ mask, float* __restrict__ out, int S, int A, int n_det,
+                                  float alpha, float beta, float span, float spacing, int nb, int plane, float scale)
+{
+    const int j = blockIdx.x * blockDim.x + threadIdx.x;
+    const int i = blockIdx.y * blockDim.y + threadIdx.y;
+    if (i >= S || j >= S) return;
+    const float m = mask ? mask[i * S + j] : 1.f;
+    float acc[C];
+#pragma unroll
+    for (int k = 0; k < C; ++k) acc[k] = 0.f;
+    if (m != 0.f) {
+        const float jf = (float)j, iff = (float)i;
+        for (int a = 0; a < A; ++a) {
+            const float4 v0 = views[2 * a], v1 = views[2 * a + 1];
+            const float rx = jf - v0.x, ry = iff - v0.y;
+            const float lat = rx * v0.z + ry * v0.w, dep = rx * v1.x + ry * v1.y;
+            if (dep <= 0.f) continue;
+            const float ratio = lat / dep;
+            const float dpos = ratio * alpha + beta;
+            const float e = ratio * span;
+            const float factor = sqrtf(span * span + e * e) / (spacing * dep);
+            const float f = floorf(dpos);
+            const int d0 = (int)f;
+            const float frac = dpos - f;
+            const float* row = sino + (size_t)a * n_det * C;
+            if (d0 >= 0 && d0 < n_det) {
+                float y[C];
+                fetch<C>(row, d0, y);
+#pragma unroll
+                for (int k = 0; k < C; ++k) acc[k] += factor * (1.f - frac) * y[k];
+            }
+            if (d0 + 1 >= 0 && d0 + 1 < n_det) {
+                float y[C];
+                fetch<C>(row, d0 + 1, y);
+#pragma unroll
+                for (int k = 0; k < C; ++k) acc[k] += factor * frac * y[k];
+            }
+        }
+    }
+    float* o = out + (size_t)i * S + j;
+#pragma unroll
+    for (int k = 0; k < C; ++k)
+        if (k < nb) o[(size_t)k * plane] = acc[k] * scale * m;
+}
+
+#define TT_TEXTURE(C)                                                                                         \
+    extern "C" __global__ void __launch_bounds__(128) parallel_forward_texture_c##C(                          \
+        tt_texture tex, const float2* trig, float* out, int S, int A, int nb, int plane, float scale, float r2) \
+    {                                                                                                         \
+        parallel_forward_texture<C, TT_FORWARD_TW>(tex, trig, out, S, A, nb, plane, scale, r2);               \
+    }                                                                                                         \
+    extern "C" __global__ void __launch_bounds__(128) fan_forward_texture_c##C(                               \
+        tt_texture tex, const float4* rays, const float* ray_weight, float* out, int S, int A, int n_det,      \
+        int n_samples, int nb, int plane)                                                                     \
+    {                                                                                                         \
+        fan_forward_texture<C, TT_FORWARD_TW>(tex, rays, ray_weight, out, S, A, n_det, n_samples, nb, plane); \
+    }
+
+#define TT_PIXEL_ADJOINT(C)                                                                                   \
+    extern "C" __global__ void fan_adjoint_pixel_c##C(const float* sino, const float4* views,                 \
+                                                      const float* mask, float* out, int S, int A, int n_det, \
+                                                      float alpha, float beta, float span, float spacing,     \
+                                                      int nb, int plane, float scale)                         \
+    {                                                                                                         \
+        fan_adjoint_pixel<C>(sino, views, mask, out, S, A, n_det, alpha, beta, span, spacing, nb, plane,      \
+                             scale);                                                                          \
+    }
+
+TT_TEXTURE(1)
+TT_TEXTURE(2)
+TT_TEXTURE(4)
+TT_PIXEL_ADJOINT(1)
+TT_PIXEL_ADJOINT(2)
+TT_PIXEL_ADJOINT(4)
+TT_PIXEL_ADJOINT(8)

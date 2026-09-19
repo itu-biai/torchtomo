@@ -99,6 +99,7 @@ class ParallelBeam(BaseProjector):
         triton: bool = False,
         angles: Optional[torch.Tensor] = None,
         backend: str = "torch",
+        approximate: bool = False,
     ):
         """
         Initialize parallel beam projector.
@@ -133,6 +134,11 @@ class ParallelBeam(BaseProjector):
                 install; the forward and adjoint are an exact matched pair of
                 their own. "triton" uses the optional Triton kernels. Both fall
                 back to "torch" on CPU, MPS, float64, or when unavailable.
+            approximate: With backend="cuda", sample the image through the GPU's
+                texture units (hardware bilinear interpolation with 8-bit weights,
+                about 3e-4 relative error) and use a pixel-driven adjoint (linear
+                interpolation on the detector). Faster, but the forward and adjoint
+                are no longer each other's exact transpose. Off by default.
         """
         n_det = n_det or img_size
         super().__init__(img_size, n_angles, n_det, angle_range, angles=angles)
@@ -152,6 +158,9 @@ class ParallelBeam(BaseProjector):
                 raise ValueError(f"triton=True conflicts with backend={backend!r}")
             backend = "triton"
         self.backend = _check_backend(backend, ("torch", "triton", "cuda"))
+        if approximate and self.backend != "cuda":
+            raise ValueError("approximate=True needs backend='cuda'")
+        self.approximate = approximate
         self._sparse_adjoint_matrix = None
         self._grid_cache: dict = {}
         self._grid_cache_used = 0
@@ -169,14 +178,20 @@ class ParallelBeam(BaseProjector):
         return self.backend == "triton" and triton_kernels_available(tensor.device, tensor.dtype)
 
     def _kernel_forward(self, x: torch.Tensor) -> torch.Tensor:
-        return _cuda_kernels.parallel_forward(
-            x, self._kernel_trig(x.device), self._kernel_mask(x.device), self.pixel_size
-        )
+        trig, mask = self._kernel_trig(x.device), self._kernel_mask(x.device)
+        if self.approximate:
+            return _cuda_kernels.parallel_forward_texture(x, trig, mask, self.pixel_size, self._kernel_cache)
+        return _cuda_kernels.parallel_forward(x, trig, mask, self.pixel_size)
 
     def _kernel_adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
-        return _cuda_kernels.parallel_adjoint(
-            sinogram, self._kernel_trig(sinogram.device), self._kernel_mask(sinogram.device), self.pixel_size
-        )
+        device = sinogram.device
+        trig, mask = self._kernel_trig(device), self._kernel_mask(device)
+        if self.approximate:
+            # Summed along a ray, a pixel's bilinear tent is close to a linear tent
+            # across the detector: the adjoint becomes a pixel-driven backprojection.
+            coords = self._kernel_coords(device)
+            return _cuda_kernels.parallel_backproject(sinogram, trig, coords, mask, self.pixel_size)
+        return _cuda_kernels.parallel_adjoint(sinogram, trig, mask, self.pixel_size)
 
     def _kernel_backproject(self, sinogram: torch.Tensor) -> torch.Tensor:
         device = sinogram.device

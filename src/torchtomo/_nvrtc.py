@@ -207,6 +207,13 @@ def _load_uncached() -> _Libraries:
         "cuLaunchKernel",
         [ctypes.c_void_p] + [ctypes.c_uint] * 7 + [ctypes.c_void_p, _c_void_pp, _c_void_pp],
     )
+    _bind(
+        driver,
+        "cuTexObjectCreate",
+        [ctypes.POINTER(ctypes.c_uint64), ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p],
+        required=False,
+    )
+    _bind(driver, "cuTexObjectDestroy", [ctypes.c_uint64], required=False)
 
     major, minor = ctypes.c_int(), ctypes.c_int()
     _nvrtc_check(nvrtc, nvrtc.nvrtcVersion(ctypes.byref(major), ctypes.byref(minor)), "nvrtcVersion")
@@ -443,6 +450,8 @@ def _as_ctype(value):
         return ctypes.c_void_p(None)
     if isinstance(value, torch.Tensor):
         return ctypes.c_void_p(value.data_ptr())
+    if isinstance(value, Texture2D):
+        return ctypes.c_uint64(value.handle.value)
     if isinstance(value, ctypes._SimpleCData):
         return value
     if isinstance(value, bool):
@@ -474,3 +483,93 @@ class Kernel:
         with _ContextGuard(libraries, self.index):
             code = libraries.driver.cuLaunchKernel(self.handle, *grid, *block, shared, stream, params, None)
         _driver_check(libraries.driver, code, f"cuLaunchKernel({self.name})")
+
+
+class _ResourceDesc(ctypes.Structure):
+    """CUDA_RESOURCE_DESC with the pitch2D member of its union laid out."""
+
+    _fields_ = [
+        ("resType", ctypes.c_int),
+        ("devPtr", ctypes.c_uint64),
+        ("format", ctypes.c_int),
+        ("numChannels", ctypes.c_uint),
+        ("width", ctypes.c_size_t),
+        ("height", ctypes.c_size_t),
+        ("pitchInBytes", ctypes.c_size_t),
+        ("reserved", ctypes.c_int * 22),
+        ("flags", ctypes.c_uint),
+    ]
+
+
+class _TextureDesc(ctypes.Structure):
+    _fields_ = [
+        ("addressMode", ctypes.c_int * 3),
+        ("filterMode", ctypes.c_int),
+        ("flags", ctypes.c_uint),
+        ("maxAnisotropy", ctypes.c_uint),
+        ("mipmapFilterMode", ctypes.c_int),
+        ("mipmapLevelBias", ctypes.c_float),
+        ("minMipmapLevelClamp", ctypes.c_float),
+        ("maxMipmapLevelClamp", ctypes.c_float),
+        ("borderColor", ctypes.c_float * 4),
+        ("reserved", ctypes.c_int * 12),
+    ]
+
+
+_RESOURCE_TYPE_PITCH2D = 3
+_FORMAT_FLOAT = 0x20
+_ADDRESS_BORDER = 3
+_FILTER_LINEAR = 1
+# Row pitch alignment for a pitch-linear texture; 32 bytes on current GPUs, so 128 is safe.
+TEXTURE_PITCH_BYTES = 128
+
+
+class Texture2D:
+    """A bilinear, zero-bordered texture over a [height, pitch, channels] float32 tensor.
+
+    The tensor must stay alive and unmoved as long as the texture is used, so the
+    texture keeps a reference to it. Rows may be padded: `width` of `pitch`
+    columns are read.
+    """
+
+    def __init__(self, storage: torch.Tensor, width: int):
+        if storage.dtype != torch.float32 or not storage.is_cuda or not storage.is_contiguous():
+            raise ValueError("texture storage must be a contiguous float32 CUDA tensor")
+        height, pitch, channels = storage.shape
+        if channels not in (1, 2, 4) or (pitch * channels * 4) % TEXTURE_PITCH_BYTES:
+            raise ValueError("texture rows must hold 1, 2 or 4 channels at a 128 byte pitch")
+        libraries = _load()
+        if libraries.driver.cuTexObjectCreate is None:
+            raise KernelRuntimeError("this CUDA driver has no texture objects")
+        self.storage = storage
+        self.index = storage.device.index
+        resource = _ResourceDesc()
+        ctypes.memset(ctypes.byref(resource), 0, ctypes.sizeof(resource))
+        resource.resType = _RESOURCE_TYPE_PITCH2D
+        resource.devPtr = storage.data_ptr()
+        resource.format = _FORMAT_FLOAT
+        resource.numChannels = channels
+        resource.width = width
+        resource.height = height
+        resource.pitchInBytes = pitch * channels * 4
+        texture = _TextureDesc()
+        ctypes.memset(ctypes.byref(texture), 0, ctypes.sizeof(texture))
+        for axis in range(3):
+            texture.addressMode[axis] = _ADDRESS_BORDER
+        texture.filterMode = _FILTER_LINEAR
+        handle = ctypes.c_uint64()
+        create = libraries.driver.cuTexObjectCreate
+        with _ContextGuard(libraries, self.index):
+            code = create(ctypes.byref(handle), ctypes.byref(resource), ctypes.byref(texture), None)
+        _driver_check(libraries.driver, code, "cuTexObjectCreate")
+        self.handle = ctypes.c_uint64(handle.value)
+
+    def __del__(self):
+        handle = getattr(self, "handle", None)
+        if handle is None or _libraries is None or _libraries.driver.cuTexObjectDestroy is None:
+            return
+        try:
+            with _ContextGuard(_libraries, self.index):
+                _libraries.driver.cuTexObjectDestroy(handle.value)
+        except Exception:  # noqa: BLE001 - interpreter shutdown or a lost context
+            pass
