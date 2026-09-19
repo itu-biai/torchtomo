@@ -1,0 +1,47 @@
+{
+  "fbp-unet": {
+    "parameters": 118305,
+    "best_epoch": 58,
+    "epochs": 60,
+    "training_seconds": 175.22570057000848,
+    "supervised": true,
+    "criterion": "image MSE against the clean image",
+    "peak_memory_bytes": 3439397888
+  },
+  "lpd": {
+    "parameters": 253220,
+    "best_epoch": 60,
+    "epochs": 60,
+    "training_seconds": 2450.817062846996,
+    "supervised": true,
+    "criterion": "image MSE against the clean image",
+    "peak_memory_bytes": 10965459968
+  },
+  "iradonmap": {
+    "parameters": 24301089,
+    "best_epoch": 60,
+    "epochs": 60,
+    "training_seconds": 383.93324949700036,
+    "supervised": true,
+    "criterion": "image MSE against the clean image",
+    "peak_memory_bytes": 5078939136
+  },
+  "noise2inverse": {
+    "parameters": 118305,
+    "best_epoch": 60,
+    "epochs": 60,
+    "training_seconds": 232.585423586017,
+    "supervised": false,
+    "criterion": "held-out subset MSE",
+    "peak_memory_bytes": 3559591936
+  },
+  "proj2proj": {
+    "parameters": 118305,
+    "best_epoch": 60,
+    "epochs": 60,
+    "training_seconds": 294.27197293698555,
+    "supervised": false,
+    "criterion": "masked projection MSE",
+    "peak_memory_bytes": 3555314176
+  }
+}
