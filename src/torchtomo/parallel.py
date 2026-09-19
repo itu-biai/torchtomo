@@ -31,6 +31,26 @@ class _TritonProject(torch.autograd.Function):
         return grad_image, None
 
 
+class _TritonAdjoint(torch.autograd.Function):
+    """A^T y via the gather kernel; backward is the fused forward, including the circle mask."""
+
+    @staticmethod
+    def forward(ctx, sinogram: torch.Tensor, projector: "ParallelBeam") -> torch.Tensor:
+        ctx.projector = projector
+        out = triton_adjoint(sinogram, projector.angles, projector.pixel_size)
+        if projector.circle:
+            out = out * projector.circle_mask.view(1, 1, projector.img_size, projector.img_size)
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_image: torch.Tensor):
+        projector = ctx.projector
+        x = grad_image.contiguous()
+        if projector.circle:
+            x = x * projector.circle_mask.view(1, 1, projector.img_size, projector.img_size)
+        return triton_forward(x, projector.angles, projector.pixel_size), None
+
+
 class _TritonBackproject(torch.autograd.Function):
     """Pixel-driven FBP backprojection via the fused kernel; VJP uses the eager interpolator."""
 
@@ -134,6 +154,11 @@ class ParallelBeam(BaseProjector):
 
     def _use_triton(self, tensor: torch.Tensor) -> bool:
         return bool(self.triton) and triton_kernels_available(tensor.device, tensor.dtype)
+
+    def adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
+        if self._use_triton(sinogram):
+            return _TritonAdjoint.apply(sinogram, self)
+        return super().adjoint(sinogram)
 
     def _set_coordinate_buffers(self, device: torch.device, dtype: torch.dtype) -> None:
         """Rebuild the base lattice in `dtype` so `.double()` is not a float32 cast."""
@@ -298,11 +323,6 @@ class ParallelBeam(BaseProjector):
         operator is linear, so the image gradient does not depend on the image.
         """
         batch = sinogram.shape[0]
-        if self._use_triton(sinogram):
-            out = triton_adjoint(sinogram, self.angles, self.pixel_size)
-            if self.circle:
-                out = out * self.circle_mask.view(1, 1, self.img_size, self.img_size)
-            return out
         if self.sparse_adjoint:
             matrix = self._ensure_sparse_adjoint_matrix()
             return (matrix @ sinogram.reshape(batch, -1).t()).t().reshape(batch, 1, self.img_size, self.img_size)

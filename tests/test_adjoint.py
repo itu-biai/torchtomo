@@ -293,8 +293,30 @@ def test_triton_forward_vjp_matches_adjoint():
     assert "TritonProject" in type(sino.grad_fn).__name__
     from_forward = torch.autograd.grad(sino, x, y)[0]
     torch.testing.assert_close(from_forward, projector.adjoint(y), rtol=2e-4, atol=2e-5)
-    from_backward = torch.autograd.grad(projector.backward(y), y, x)[0]
+    aty = projector.backward(y)
+    assert "TritonAdjoint" in type(aty.grad_fn).__name__
+    from_backward = torch.autograd.grad(aty, y, x)[0]
     torch.testing.assert_close(from_backward, projector.forward(x.detach()), rtol=2e-4, atol=2e-5)
+    x_loop = x.detach().requires_grad_(True)
+    projector.adjoint(projector.forward(x_loop)).sum().backward()
+    assert x_loop.grad is not None
+    assert torch.isfinite(x_loop.grad).all()
+    assert x_loop.grad.norm() > 0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_triton_adjoint_vjp_is_fused_forward():
+    """y.requires_grad; VJP of backward is fused forward; A^T A x is a valid graph."""
+    _require_triton_cuda()
+    torch.manual_seed(32)
+    projector = ParallelBeam(img_size=16, n_angles=11, circle=True, triton=True).cuda()
+    x = torch.randn(2, 1, 16, 16, device="cuda")
+    y = torch.randn(2, 1, 11, 16, device="cuda", requires_grad=True)
+    from_adj = torch.autograd.grad(projector.backward(y), y, x)[0]
+    torch.testing.assert_close(from_adj, projector.forward(x), rtol=2e-4, atol=2e-5)
+    x_loop = x.detach().requires_grad_(True)
+    projector.adjoint(projector.forward(x_loop)).sum().backward()
+    assert x_loop.grad is not None and torch.isfinite(x_loop.grad).all() and x_loop.grad.norm() > 0
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
