@@ -12,6 +12,7 @@ on the validation split, never on the test split.
 
 import logging
 import math
+import time
 
 import torch
 from bm3d import denoise as bm3d_denoise
@@ -272,6 +273,7 @@ def run_classical(projector, data, unet, operator_norm, args, region):
     for name, (inputs, unit, settings, max_steps, factory, notes) in table.items():
         primary, extra_keys = inputs[0], inputs[1:]
         curves, best = {}, None
+        started = time.perf_counter()
         for setting in settings:
             curve = score_curve(
                 factory(setting, max_steps),
@@ -304,14 +306,26 @@ def run_classical(projector, data, unet, operator_norm, args, region):
             args.batch_size,
             extra=tuple(data[key][test_ids] for key in extra_keys),
         )
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        seconds = time.perf_counter() - started
         selection[name] = {
             "unit": unit,
             "selected_steps": steps,
             "selected_setting": setting,
             "val_psnr_db": score,
             "searched_steps": max_steps,
+            "seconds": seconds,
             **notes,
             "curves": curves,
         }
-        LOGGER.info("classical method=%s selected %s=%d setting=%s val_psnr_db=%.4f", name, unit, steps, label, score)
+        LOGGER.info(
+            "classical method=%s selected %s=%d setting=%s val_psnr_db=%.4f seconds=%.2f",
+            name,
+            unit,
+            steps,
+            label,
+            score,
+            seconds,
+        )
     return reconstructions, selection

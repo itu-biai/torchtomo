@@ -42,6 +42,40 @@ def write_json(path, value):
     temporary.replace(path)
 
 
+def fbp_split_seconds(projector, sinograms, device, batch_size):
+    """Wall-clock of FBP on one split, on the device the rest of the run uses."""
+    device = torch.device(device)
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    start = time.perf_counter()
+    images = torch.cat([projector.fbp(batch.to(device)).cpu() for batch in sinograms.split(batch_size)])
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    return images, time.perf_counter() - start
+
+
+def record_method_seconds(metrics, training, selection, fbp_seconds):
+    """Copy wall-clock seconds onto every scored method in metrics.json.
+
+    Learned methods use training_seconds from train_model; classical methods use
+    the search-plus-reconstruct time recorded in run_classical; FBP uses the
+    timed reconstruction of the scored split.
+    """
+    for name, row in metrics.items():
+        if name == "fbp":
+            seconds = fbp_seconds
+        elif name in training:
+            seconds = training[name]["training_seconds"]
+        elif name in selection:
+            seconds = selection[name]["seconds"]
+        else:
+            raise KeyError(f"no seconds recorded for method {name!r}")
+        seconds = float(seconds)
+        if not (seconds > 0 and seconds != float("inf")):
+            raise ValueError(f"{name} seconds must be a positive finite value, got {seconds}")
+        row["seconds"] = seconds
+
+
 def save_checkpoint(path, payload):
     temporary = path.with_suffix(path.suffix + ".tmp")
     torch.save(payload, temporary)
@@ -792,9 +826,11 @@ def main():
 
     test_ids = data["splits"]["test"]
     region = projector.circle_mask.bool()
+    _, fbp_seconds = fbp_split_seconds(projector, data["noisy"][test_ids], args.device, args.batch_size)
     scored = {"fbp": data["fbp"][test_ids]}
     for name, model, objective, _, _ in model_specs:
         scored[name] = objective.reconstruct(model, test_ids, args.device, args.batch_size)
+    selection = {}
     if not args.skip_classical:
         denoiser = dict((name, model) for name, model, *_ in model_specs).get("fbp-unet")
         untrained, selection = run_classical(projector, data, denoiser, operator_norm, args, region)
@@ -818,14 +854,18 @@ def main():
     metrics = {}
     for name, prediction in reconstructions.items():
         metrics[name] = summarize(prediction, data["truth"][test_ids], region=region, windows=test_windows)
+    record_method_seconds(metrics, training, selection, fbp_seconds)
+    for name in metrics:
         LOGGER.info(
-            "TEST method=%s mean_psnr_db=%.4f roi_psnr_db=%.4f window_psnr_db=%s std_psnr_db=%.4f mse=%.7f",
+            "TEST method=%s mean_psnr_db=%.4f roi_psnr_db=%.4f window_psnr_db=%s "
+            "std_psnr_db=%.4f mse=%.7f seconds=%.2f",
             name,
             metrics[name]["mean_psnr_db"],
             metrics[name]["mean_roi_psnr_db"],
             f"{metrics[name]['mean_window_psnr_db']:.4f}" if test_windows is not None else "n/a",
             metrics[name]["std_psnr_db"],
             metrics[name]["mse"],
+            metrics[name]["seconds"],
         )
     # Recorded as a reference rather than a method: what the analytic reconstruction
     # would give from the same geometry with no noise at all.
