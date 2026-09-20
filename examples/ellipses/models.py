@@ -102,7 +102,7 @@ def ramp_filter_matrix(projector, filter_name="ramp"):
     """The dense matrix form of the filtering fbp() applies along the detector axis.
 
     Feeding the identity through apply_filter recovers the operator exactly,
-    including its padding, so a learnable layer can start from the analytic filter.
+    including its padding, so a learnable layer can start from the ramp fbp() would have used.
     """
     from torchtomo import apply_filter
 
