@@ -1,9 +1,9 @@
 {
   "fbp-unet": {
     "parameters": 118305,
-    "best_epoch": 117,
+    "best_epoch": 120,
     "epochs": 120,
-    "training_seconds": 111.65083470800892,
+    "training_seconds": 110.59942339701229,
     "supervised": true,
     "criterion": "image MSE against the clean image",
     "peak_memory_bytes": 2220387328
@@ -12,7 +12,7 @@
     "parameters": 253220,
     "best_epoch": 120,
     "epochs": 120,
-    "training_seconds": 724.5864027689968,
+    "training_seconds": 724.4449182999961,
     "supervised": true,
     "criterion": "image MSE against the clean image",
     "peak_memory_bytes": 9078700032
@@ -21,7 +21,7 @@
     "parameters": 23973409,
     "best_epoch": 120,
     "epochs": 120,
-    "training_seconds": 379.26530952900066,
+    "training_seconds": 383.3111798929749,
     "supervised": true,
     "criterion": "image MSE against the clean image",
     "peak_memory_bytes": 4141336064
@@ -30,7 +30,7 @@
     "parameters": 118305,
     "best_epoch": 117,
     "epochs": 120,
-    "training_seconds": 140.54194962701877,
+    "training_seconds": 141.00456855801167,
     "supervised": false,
     "criterion": "held-out subset MSE",
     "peak_memory_bytes": 2623178240
@@ -39,7 +39,7 @@
     "parameters": 118305,
     "best_epoch": 120,
     "epochs": 120,
-    "training_seconds": 136.79110299699823,
+    "training_seconds": 137.34861666199868,
     "supervised": false,
     "criterion": "masked projection MSE",
     "peak_memory_bytes": 2617854976

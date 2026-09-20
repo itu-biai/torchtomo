@@ -1,5 +1,46 @@
 {
   "split": "train",
-  "trials": [],
-  "selected_photons": 66265.7415766232
+  "trials": [
+    {
+      "photons": 10.0,
+      "train_fbp_psnr_db": -15.725282669067383
+    },
+    {
+      "photons": 100000000.0,
+      "train_fbp_psnr_db": 34.18496322631836
+    },
+    {
+      "photons": 31622.776601683792,
+      "train_fbp_psnr_db": 20.173809051513672
+    },
+    {
+      "photons": 1778279.410038923,
+      "train_fbp_psnr_db": 32.604087829589844
+    },
+    {
+      "photons": 237137.37056616554,
+      "train_fbp_psnr_db": 27.90026092529297
+    },
+    {
+      "photons": 86596.43233600653,
+      "train_fbp_psnr_db": 24.24968147277832
+    },
+    {
+      "photons": 52329.91146814947,
+      "train_fbp_psnr_db": 22.250890731811523
+    },
+    {
+      "photons": 67317.03824144982,
+      "train_fbp_psnr_db": 23.26034164428711
+    },
+    {
+      "photons": 59352.29272296986,
+      "train_fbp_psnr_db": 22.75924301147461
+    },
+    {
+      "photons": 63209.3391750767,
+      "train_fbp_psnr_db": 23.00766944885254
+    }
+  ],
+  "selected_photons": 63209.3391750767
 }

@@ -6,7 +6,7 @@
   "batch_size": 5,
   "learning_rate": 0.001,
   "target_psnr": 23.0,
-  "photons": 66265.7415766232,
+  "photons": 63209.3391750767,
   "seed": 2026,
   "threads": 4,
   "micro_batch": 0,
