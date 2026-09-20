@@ -80,24 +80,24 @@ keeps only per-ray tables on the GPU (6 MB at 512 px and 360 angles, against
 fall back to the PyTorch path, as does a CUDA build without NVRTC.
 
 512 x 512, batch 4, RTX 2080 Ti, milliseconds for forward / adjoint / FBP,
-all measured in one process:
+all measured in one process by `benchmark/benchmark_speed.py`:
 
-| Geometry, angles | `torch` | `cuda` | `cuda`, approximate | LEAP | torch-radon |
-| --- | --- | --- | --- | --- | --- |
-| parallel, 360 | 18.0 / 38.3 / 14.3 | 2.3 / 2.1 / 0.6 | 1.0 / 0.5 / 0.6 | 2.7 / 1.7 / 7.8 | 0.7 / 0.6 / 0.9 |
-| parallel, 90 | 3.3 / 8.4 / 3.1 | 0.6 / 0.5 / 0.2 | 0.3 / 0.1 / 0.2 | 1.1 / 0.6 / 3.5 | 0.2 / 0.2 / 0.2 |
-| fan, 360 | 16.2 / 53.0 / 14.9 | 2.8 / 3.2 / 1.1 | 1.3 / 0.8 / 1.1 | 5.0 / 3.6 / 17.5 | 2.0 / 1.1 / 1.6 |
-| fan, 90 | 4.1 / 13.1 / 3.8 | 0.7 / 0.8 / 0.3 | 0.4 / 0.2 / 0.3 | 2.0 / 1.1 / 6.1 | 0.4 / 0.2 / 0.3 |
+| Geometry, angles | `torch` | `cuda` | `cuda`, approximate |
+| --- | --- | --- | --- |
+| parallel, 360 | 18.0 / 38.3 / 14.3 | 2.3 / 2.1 / 0.6 | 1.0 / 0.5 / 0.6 |
+| parallel, 90 | 3.3 / 8.4 / 3.1 | 0.6 / 0.5 / 0.2 | 0.3 / 0.1 / 0.2 |
+| fan, 360 | 16.2 / 53.0 / 14.9 | 2.8 / 3.2 / 1.1 | 1.3 / 0.8 / 1.1 |
+| fan, 90 | 4.1 / 13.1 / 3.8 | 0.7 / 0.8 / 0.3 | 0.4 / 0.2 / 0.3 |
 
-torch-radon samples through the GPU's texture units, whose 8-bit interpolation
-weights are fast but not exact, and its adjoint is a pixel-driven backprojection
-rather than the transpose of its forward.
+`backend="cuda", approximate=True` trades exactness for speed: the forward
+samples through the GPU's texture units, whose 8-bit interpolation weights are
+fast but not exact (about 1e-4 relative difference from the exact forward at
+256 px), and the adjoint becomes a pixel-driven backprojection (about 1% from
+the exact adjoint). They are no longer each other's exact transpose, so the
+default stays exact.
 
-`backend="cuda", approximate=True` makes the same trade: the forward samples
-through the texture units (about 1e-4 relative difference from the exact
-forward at 256 px) and the adjoint becomes a pixel-driven backprojection (about
-1% from the exact adjoint). They are no longer each other's exact transpose, so
-the default stays exact.
+The same table against LEAP and torch-radon is in
+[torchtomo-benchmark](https://github.com/itu-biai/torchtomo-benchmark).
 
 ## Differentiable Optimization Example
 
@@ -214,20 +214,17 @@ PYTHONPATH=src python benchmark/benchmark_adjoint.py --pairs 500 --dtype float64
 - Image: `[B, 1, H, W]`
 - Sinogram: `[B, 1, n_angles, n_det]`
 
-## Training Example
+## Benchmarks
 
-The [ellipse reconstruction example](examples/ellipses/README.md) generates 100
-phantoms with a 60/20/20 train/validation/test split, or loads real CT slices,
-calibrates transmission Poisson noise to approximately 23 dB FBP PSNR, and trains
-FBP+U-Net, iRadonMAP, and Learned Primal-Dual models, plus Noise2Inverse and
-Proj2Proj, which train without any clean image. It scores them against FBP, SIRT,
-SART, BM3D, and RED, the last of which reuses the trained U-Net as its denoiser. It saves Python
-training logs, curves, checkpoints, and PNG comparisons using the existing
-development dependencies.
+`benchmark/` holds torchtomo's own accuracy and speed checks; see
+[benchmark/README.md](benchmark/README.md).
 
-```bash
-PYTHONPATH=src .venv/bin/python examples/ellipses/train.py
-```
+Comparisons with other projectors and with trained reconstruction methods live
+in [torchtomo-benchmark](https://github.com/itu-biai/torchtomo-benchmark): the
+LEAP and torch-radon comparison, and a training pipeline on ellipse phantoms and
+real CT slices that scores FBP+U-Net, iRadonMAP, Learned Primal-Dual,
+Noise2Inverse, and Proj2Proj against FBP, SIRT, SART, BM3D, and RED, with the
+recorded results.
 
 ## Development
 
