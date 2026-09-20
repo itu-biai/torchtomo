@@ -34,14 +34,8 @@ test = [
     "pytest",
     "pytest-cov",
 ]
-benchmark = [
-    "matplotlib",
-    "pytest",
-    "scikit-image",
-]
 dev = [
     "build",
-    "matplotlib",
     "pytest",
     "pytest-cov",
     "ruff",

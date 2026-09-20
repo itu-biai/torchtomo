@@ -216,12 +216,13 @@ PYTHONPATH=src python benchmark/benchmark_adjoint.py --pairs 500 --dtype float64
 
 ## Benchmarks
 
-`benchmark/` holds torchtomo's own accuracy and speed checks; see
-[benchmark/README.md](benchmark/README.md).
+`benchmark/` holds torchtomo's own speed and self-consistency checks, which run
+on torch alone; see [benchmark/README.md](benchmark/README.md). The library and
+its tests need nothing beyond torch and numpy.
 
-Comparisons with other projectors and with trained reconstruction methods live
-in [torchtomo-benchmark](https://github.com/itu-biai/torchtomo-benchmark): the
-LEAP and torch-radon comparison, and a training pipeline on ellipse phantoms and
+Anything that needs another library lives in
+[torchtomo-benchmark](https://github.com/itu-biai/torchtomo-benchmark): the
+scikit-image, LEAP, and torch-radon comparisons, and a training pipeline on ellipse phantoms and
 real CT slices that scores FBP+U-Net, iRadonMAP, Learned Primal-Dual,
 Noise2Inverse, and Proj2Proj against FBP, SIRT, SART, BM3D, and RED, with the
 recorded results.
