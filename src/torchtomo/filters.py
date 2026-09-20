@@ -21,6 +21,31 @@ def _filter_cache_key(
     return (size, filter_name, real_fft, device.type, device.index, dtype)
 
 
+def _ram_lak(size: int, device: torch.device | None, *, real_fft: bool) -> torch.Tensor:
+    """Ramp filter as the DFT of Kak and Slaney's spatial kernel (Chapter 3, Eq. 61).
+
+    Sampling the ramp analytically as `|f|` puts an exact zero in the DC bin, which
+    throws away the mean of every projection: the reconstruction then sits a constant
+    below the object (-0.017 on Shepp-Logan) and reprojecting it returns 90.6% of the
+    measurements it came from. The spatial kernel truncated to `size` taps transforms
+    to the same ramp within a few tenths of a percent, but its DC bin is the small
+    positive value the truncation leaves, and that one bin carries a third of a
+    sinogram's energy. With it the reprojection gain is 1.000 and the bias is zero to
+    four decimals, which is where LEAP and torch-radon sit.
+    """
+    # Built on the CPU in float64: it is one short vector, cached per size and
+    # device, and MPS has no float64 at all.
+    index = torch.arange(size)
+    # Signed tap index in FFT order: 0, 1, ... size//2, -(size - size//2 - 1), ... -1.
+    tap = torch.where(index <= size // 2, index, index - size).to(torch.float64)
+    kernel = torch.zeros(size, dtype=torch.float64)
+    kernel[tap == 0] = 0.25
+    odd = tap % 2 != 0
+    kernel[odd] = -1.0 / (torch.pi * tap[odd]) ** 2
+    spectrum = fft.rfft(kernel) if real_fft else fft.fft(kernel)
+    return spectrum.real.to(device=device, dtype=torch.float32)
+
+
 def _build_filter(
     size: int,
     filter_name: FilterType,
@@ -35,7 +60,7 @@ def _build_filter(
 
     freq_fn = fft.rfftfreq if real_fft else fft.fftfreq
     freq = freq_fn(size, d=1.0, device=device, dtype=torch.float32)
-    ramp = freq.abs()
+    ramp = _ram_lak(size, device, real_fft=real_fft)
 
     if filter_name == "ramp":
         filt = ramp

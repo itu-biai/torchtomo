@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torchtomo"
-version = "0.2.0"
+version = "0.3.0"
 description = "Differentiable CT Reconstruction in Pure PyTorch"
 readme = "README.md"
 license = "CC-BY-NC-4.0"
@@ -34,14 +34,8 @@ test = [
     "pytest",
     "pytest-cov",
 ]
-benchmark = [
-    "pytest",
-    "scikit-image",
-    "torch-radon",
-]
 dev = [
     "build",
-    "matplotlib",
     "pytest",
     "pytest-cov",
     "ruff",
@@ -56,6 +50,10 @@ License = "https://creativecommons.org/licenses/by-nc/4.0/"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# CUDA source compiled at run time by NVRTC; nothing is built at install.
+torchtomo = ["*.cu"]
 
 [tool.ruff]
 line-length = 120

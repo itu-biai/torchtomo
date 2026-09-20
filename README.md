@@ -12,6 +12,9 @@ TorchTomo provides forward projection, an exact discrete adjoint, analytical bac
 ## Features
 
 - Pure PyTorch implementation with no custom CUDA build step
+- Optional fast CUDA kernels (`backend="cuda"`, or `"auto"` to take them wherever
+  they load), compiled at first use by the NVRTC that ships with PyTorch, so
+  installation stays `pip install torchtomo`
 - Autograd-friendly operators for learned reconstruction pipelines
 - Parallel-beam and fan-beam (flat detector) projectors
 - Built-in FBP filters: `ramp`, `shepp-logan`, `cosine`, `hamming`, `hann`, `none`
@@ -44,17 +47,57 @@ recon = projector.fbp(sinogram, filter_name="ramp")   # [1, 1, 256, 256]
 from torchtomo import FanBeam, shepp_logan
 
 phantom = shepp_logan(size=256)
-projector = FanBeam(
-    img_size=256,
-    n_angles=360,
-    n_det=400,
-    src_dist=500.0,
-    det_dist=500.0,
-)
+projector = FanBeam(img_size=256, n_angles=360)
 
 sinogram = projector.forward(phantom)
 recon = projector.fbp(sinogram, filter_name="hann")
 ```
+
+## Fast CUDA Kernels
+
+```python
+projector = ParallelBeam(img_size=512, n_angles=360, backend="auto").cuda()
+fan = FanBeam(img_size=512, n_angles=360, backend="cuda").cuda()
+```
+
+`backend="auto"` takes the CUDA kernels wherever NVRTC loads and the PyTorch path
+everywhere else. It decides once, in the constructor, so `projector.backend`
+reports which one it became.
+
+`backend="cuda"` runs forward, adjoint, and FBP backprojection on CUDA kernels
+written in C++ and compiled the first time they are needed by NVRTC, the
+runtime compiler every CUDA build of PyTorch already installs. The kernels are
+launched through the CUDA driver on PyTorch's current stream, and the compiled
+binary is cached under `~/.cache/torchtomo` (`TORCHTOMO_KERNEL_CACHE` overrides
+the location, an empty value disables it). There is no build step, no nvcc, and
+no extra dependency. The first call compiles for about a second.
+
+The forward and adjoint are an exact matched pair of their own: the adjoint
+equals the transpose of the forward entry by entry, to float32 roundoff. They
+agree with the default PyTorch path to about 1e-5. Fan beam on this backend
+keeps only per-ray tables on the GPU (6 MB at 512 px and 360 angles, against
+2.2 GB of sampling grids for the PyTorch path). Float64, CPU, and MPS tensors
+fall back to the PyTorch path, as does a CUDA build without NVRTC.
+
+512 x 512, batch 4, RTX 2080 Ti, milliseconds for forward / adjoint / FBP,
+all measured in one process by `benchmark/benchmark_speed.py`:
+
+| Geometry, angles | `torch` | `cuda` | `cuda`, approximate |
+| --- | --- | --- | --- |
+| parallel, 360 | 18.0 / 38.3 / 14.3 | 2.3 / 2.1 / 0.6 | 1.0 / 0.5 / 0.6 |
+| parallel, 90 | 3.3 / 8.4 / 3.1 | 0.6 / 0.5 / 0.2 | 0.3 / 0.1 / 0.2 |
+| fan, 360 | 16.2 / 53.0 / 14.9 | 2.8 / 3.2 / 1.1 | 1.3 / 0.8 / 1.1 |
+| fan, 90 | 4.1 / 13.1 / 3.8 | 0.7 / 0.8 / 0.3 | 0.4 / 0.2 / 0.3 |
+
+`backend="cuda", approximate=True` trades exactness for speed: the forward
+samples through the GPU's texture units, whose 8-bit interpolation weights are
+fast but not exact (about 1e-4 relative difference from the exact forward at
+256 px), and the adjoint becomes a pixel-driven backprojection (about 1% from
+the exact adjoint). They are no longer each other's exact transpose, so the
+default stays exact.
+
+The same table against LEAP and torch-radon is in
+[torchtomo-benchmark](https://github.com/itu-biai/torchtomo-benchmark).
 
 ## Differentiable Optimization Example
 
@@ -94,6 +137,15 @@ torch.testing.assert_close((ax * y).sum(), (x * aty).sum())
 aty.square().mean().backward()  # gradients reach y and upstream dual networks
 ```
 
+**Migration (0.3):** `fbp()` reconstructions change. The ramp filter is now the
+DFT of Kak and Slaney's spatial kernel rather than a sampled `|f|`, which restores
+the DC bin that sampling zeroes. Reconstructions no longer sit a constant below
+the object (-0.017 to +0.00004 on Shepp-Logan at 512 px), and reprojecting one
+returns the measurements it came from (gain 0.906 to 1.000, relative residual
+0.100 to 0.005, level with LEAP). PSNR against the phantom rises 1.3 dB and SSIM
+0.23 at 512 px and 360 views. Numbers from FBP runs before 0.3 are not comparable
+with numbers after it.
+
 **Migration:** `backward(y)` now computes the exact discrete adjoint. The previous
 analytical backprojection is available as `backproject(y)` and is still used by
 `fbp()`. It includes angular normalization and, for fan-beam geometry, distance weights.
@@ -104,17 +156,36 @@ on the old `backward()` values should use `backproject()` to preserve those valu
 LPD code can continue to use `forward()`/`backward()` as a matched pair; existing
 models may need retraining or step-size retuning after the operator change.
 
-The adjoint evaluates a temporary forward vector-Jacobian product (VJP), then
-uses the explicit training gradient $g \mapsto A g$. This avoids requiring
-second derivatives of `grid_sample`, which are unavailable in some PyTorch
-versions. It supports `torch.no_grad()` and `torch.inference_mode()` evaluation.
+The adjoint calls `grid_sample`'s input backward kernel directly on CPU and
+CUDA for parallel beam and fan beam, then uses the explicit training gradient
+$g \mapsto A g$. That avoids both a throwaway forward and second derivatives of
+`grid_sample`, which are unavailable in some PyTorch versions. MPS and PyTorch
+builds before 1.11 (where `output_mask` was added) fall back to a temporary
+forward VJP. Both paths support `torch.no_grad()` and `torch.inference_mode()`.
 On MPS, bilinear sampling uses differentiable `gather` operations because some
 PyTorch versions also lack the first backward derivative of `grid_sample` on
 that device. Computation stays on MPS without requiring CPU fallback.
 Geometry is fixed and must not change between evaluation and backpropagation;
 geometry gradients are not supported. Match projector and input device/dtype.
-The temporary forward graph can use more memory and time than the analytical
-backprojection; profile representative LPD batch sizes before large runs.
+
+Default projection angles cover `[start, end)` with spacing `(end - start) / n`,
+so a half-turn does not include both 0 and pi. Pass `angles=` for an explicit list.
+
+`ParallelBeam(..., backend="triton")` (or the older `triton=True`) uses fused
+Triton kernels for forward, adjoint, and FBP backprojection when Triton is
+available. `backend="cuda"`, above, is faster and covers fan beam too.
+
+`ParallelBeam(..., sparse_adjoint=True)` builds a CSR matrix of the forward map
+once and applies its transpose with a sparse-dense product. Off by default: the
+matrix is hundreds of megabytes at 512 px with 90 angles.
+
+`ParallelBeam(..., grid_cache_bytes=...)` bounds how much of the per-angle
+sampling grids stay resident. The default 256 MB holds a 512 px, 90 angle
+forward grid (189 MB) and keeps a 512 px, 360 angle projector in the hundreds
+of megabytes instead of 1.5 GB, at the cost of rebuilding about two thirds of
+those grids on every call. Raise the budget above the grid size if the memory
+is free; leaving the default protects LPD headroom on an 11 GB card. Set it to
+0 to always rebuild.
 
 For adjoint diagnostics, prefer float64 and report an aggregate residual as well
 as per-pair relative errors: near-zero inner products can make the latter large
@@ -126,12 +197,12 @@ PYTHONPATH=src python benchmark/benchmark_adjoint.py --pairs 500 --dtype float64
 
 ## API Snapshot
 
-- `ParallelBeam(...)`
-- `FanBeam(...)`
+- `ParallelBeam(..., backend="torch" | "cuda" | "triton" | "auto")`
+- `FanBeam(..., backend="torch" | "cuda" | "auto")`
 - `projector.forward(image)`
-- `projector.backward(sinogram)` — exact discrete adjoint, for LPD/iterative methods
-- `projector.adjoint(sinogram)` — equivalent to `backward(sinogram)`
-- `projector.backproject(sinogram)` — analytical backprojection, used by FBP
+- `projector.backward(sinogram)`: exact discrete adjoint, for LPD/iterative methods
+- `projector.adjoint(sinogram)`: equivalent to `backward(sinogram)`
+- `projector.backproject(sinogram)`: analytical backprojection, used by FBP
 - `projector.fbp(sinogram, filter_name="ramp")`
 - `apply_filter(sinogram, filter_name=...)`
 - `shepp_logan(size=..., device=...)`
@@ -143,17 +214,18 @@ PYTHONPATH=src python benchmark/benchmark_adjoint.py --pairs 500 --dtype float64
 - Image: `[B, 1, H, W]`
 - Sinogram: `[B, 1, n_angles, n_det]`
 
-## Training Example
+## Benchmarks
 
-The [ellipse reconstruction example](examples/ellipses/README.md) generates 100
-phantoms with a 60/20/20 train/validation/test split, calibrates transmission
-Poisson noise to approximately 23 dB FBP PSNR, and trains FBP+U-Net and Learned
-Primal-Dual models. It saves Python training logs, curves, checkpoints, and PNG
-comparisons using the existing development dependencies.
+`benchmark/` holds torchtomo's own speed and self-consistency checks, which run
+on torch alone; see [benchmark/README.md](benchmark/README.md). The library and
+its tests need nothing beyond torch and numpy.
 
-```bash
-PYTHONPATH=src .venv/bin/python examples/ellipses/train.py
-```
+Anything that needs another library lives in
+[torchtomo-benchmark](https://github.com/itu-biai/torchtomo-benchmark): the
+scikit-image, LEAP, and torch-radon comparisons, and a training pipeline on ellipse phantoms and
+real CT slices that scores FBP+U-Net, iRadonMAP, Learned Primal-Dual,
+Noise2Inverse, and Proj2Proj against FBP, SIRT, SART, BM3D, and RED, with the
+recorded results.
 
 ## Development
 

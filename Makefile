@@ -37,13 +37,13 @@ test: ## Run tests
 test-cov: ## Run tests with coverage
 	$(PYTEST) --cov=torchtomo --cov-report=term-missing
 
-.PHONY: benchmark
-benchmark: ## Run benchmark tests (requires benchmark extras)
-	$(PYTEST) benchmark/
-
 .PHONY: benchmark-speed
-benchmark-speed: ## Run speed benchmarks (requires benchmark extras)
+benchmark-speed: ## Print the backend speed table
 	PYTHONPATH=src $(PYTHON) benchmark/benchmark_speed.py
+
+.PHONY: benchmark-adjoint
+benchmark-adjoint: ## Inner-product test of forward() against adjoint()
+	PYTHONPATH=src $(PYTHON) benchmark/benchmark_adjoint.py --pairs 500 --dtype float64
 
 .PHONY: check
 check: format lint test ## Run format, lint, and test

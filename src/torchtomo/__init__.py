@@ -13,8 +13,7 @@ Example:
     >>> recon = projector.fbp(sinogram)
     >>>
     >>> # Fan beam
-    >>> projector = FanBeam(img_size=256, n_angles=360, n_det=400,
-    ...                     src_dist=500, det_dist=500)
+    >>> projector = FanBeam(img_size=256, n_angles=360)
     >>> sinogram = projector.forward(image)
     >>> recon = projector.fbp(sinogram)
 """
@@ -24,7 +23,7 @@ from .filters import apply_filter, get_filter
 from .parallel import ParallelBeam
 from .phantom import circle_phantom, shepp_logan
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 __all__ = [
     "ParallelBeam",
     "FanBeam",
