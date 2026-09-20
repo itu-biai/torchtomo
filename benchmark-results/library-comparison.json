@@ -1,8 +1,10 @@
 {
   "device": "NVIDIA GeForce RTX 2080 Ti",
   "torch": "2.4.0+cu121",
+  "geometry": "parallel",
   "libraries": [
     "torchtomo",
+    "torchtomo-cuda",
     "leap",
     "torch-radon"
   ],
@@ -12,474 +14,666 @@
       "size": 256,
       "angles": 90,
       "phantom": "shepp-logan",
-      "psnr_db": 24.273107528686523,
-      "ssim": 0.5392892799002654
+      "psnr_db": 25.591394424438477,
+      "ssim": 0.6482946050064564
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 256,
+      "angles": 90,
+      "phantom": "shepp-logan",
+      "psnr_db": 25.591384887695312,
+      "ssim": 0.648294162385866
     },
     {
       "library": "leap",
       "size": 256,
       "angles": 90,
       "phantom": "shepp-logan",
-      "psnr_db": 25.571147918701172,
-      "ssim": 0.61807741358608
+      "psnr_db": 25.548381805419922,
+      "ssim": 0.6184457933221161
     },
     {
       "library": "torch-radon",
       "size": 256,
       "angles": 90,
       "phantom": "shepp-logan",
-      "psnr_db": 24.6280460357666,
-      "ssim": 0.608306760790972
+      "psnr_db": 25.593578338623047,
+      "ssim": 0.6481224667691737
     },
     {
       "library": "torchtomo",
       "size": 256,
       "angles": 90,
       "phantom": "disc",
-      "psnr_db": 29.166669845581055,
-      "ssim": 0.4888953528352082
+      "psnr_db": 30.45579719543457,
+      "ssim": 0.6845376289412975
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 256,
+      "angles": 90,
+      "phantom": "disc",
+      "psnr_db": 30.455781936645508,
+      "ssim": 0.6845370461030006
     },
     {
       "library": "leap",
       "size": 256,
       "angles": 90,
       "phantom": "disc",
-      "psnr_db": 30.27952003479004,
-      "ssim": 0.6557776002601385
+      "psnr_db": 30.233055114746094,
+      "ssim": 0.653300939414978
     },
     {
       "library": "torch-radon",
       "size": 256,
       "angles": 90,
       "phantom": "disc",
-      "psnr_db": 29.504894256591797,
-      "ssim": 0.569398478063196
+      "psnr_db": 30.456838607788086,
+      "ssim": 0.68481253822124
     },
     {
       "library": "torchtomo",
       "size": 256,
       "angles": 180,
       "phantom": "shepp-logan",
-      "psnr_db": 26.201955795288086,
-      "ssim": 0.6572683358756132
+      "psnr_db": 27.068653106689453,
+      "ssim": 0.8504258250990212
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 256,
+      "angles": 180,
+      "phantom": "shepp-logan",
+      "psnr_db": 27.068649291992188,
+      "ssim": 0.8504254579136371
     },
     {
       "library": "leap",
       "size": 256,
       "angles": 180,
       "phantom": "shepp-logan",
-      "psnr_db": 27.321794509887695,
-      "ssim": 0.8223241091298014
+      "psnr_db": 27.327058792114258,
+      "ssim": 0.8188697716584503
     },
     {
       "library": "torch-radon",
       "size": 256,
       "angles": 180,
       "phantom": "shepp-logan",
-      "psnr_db": 26.768653869628906,
-      "ssim": 0.8099523282390982
+      "psnr_db": 27.073888778686523,
+      "ssim": 0.8496274787423461
     },
     {
       "library": "torchtomo",
       "size": 256,
       "angles": 180,
       "phantom": "disc",
-      "psnr_db": 32.7930793762207,
-      "ssim": 0.6355343102173209
+      "psnr_db": 34.14225769042969,
+      "ssim": 0.9342260675522089
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 256,
+      "angles": 180,
+      "phantom": "disc",
+      "psnr_db": 34.142242431640625,
+      "ssim": 0.9342258492083549
     },
     {
       "library": "leap",
       "size": 256,
       "angles": 180,
       "phantom": "disc",
-      "psnr_db": 34.44242858886719,
-      "ssim": 0.9178467319937944
+      "psnr_db": 34.465938568115234,
+      "ssim": 0.9187852143610716
     },
     {
       "library": "torch-radon",
       "size": 256,
       "angles": 180,
       "phantom": "disc",
-      "psnr_db": 33.609169006347656,
-      "ssim": 0.848413794818759
+      "psnr_db": 34.14216613769531,
+      "ssim": 0.9347432313791514
     },
     {
       "library": "torchtomo",
       "size": 256,
       "angles": 360,
       "phantom": "shepp-logan",
-      "psnr_db": 26.739046096801758,
-      "ssim": 0.7180858694466083
+      "psnr_db": 27.45683479309082,
+      "ssim": 0.9374809352492541
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 256,
+      "angles": 360,
+      "phantom": "shepp-logan",
+      "psnr_db": 27.456829071044922,
+      "ssim": 0.9374807734086067
     },
     {
       "library": "leap",
       "size": 256,
       "angles": 360,
       "phantom": "shepp-logan",
-      "psnr_db": 27.876937866210938,
-      "ssim": 0.9231945242523849
+      "psnr_db": 27.888296127319336,
+      "ssim": 0.92251837495929
     },
     {
       "library": "torch-radon",
       "size": 256,
       "angles": 360,
       "phantom": "shepp-logan",
-      "psnr_db": 27.387248992919922,
-      "ssim": 0.915449729698956
+      "psnr_db": 27.460765838623047,
+      "ssim": 0.937165572087273
     },
     {
       "library": "torchtomo",
       "size": 256,
       "angles": 360,
       "phantom": "disc",
-      "psnr_db": 33.741905212402344,
-      "ssim": 0.6538783310570717
+      "psnr_db": 34.92245864868164,
+      "ssim": 0.9860214473329783
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 256,
+      "angles": 360,
+      "phantom": "disc",
+      "psnr_db": 34.92244338989258,
+      "ssim": 0.9860214147280455
     },
     {
       "library": "leap",
       "size": 256,
       "angles": 360,
       "phantom": "disc",
-      "psnr_db": 35.621665954589844,
-      "ssim": 0.9846398027629852
+      "psnr_db": 35.61491394042969,
+      "ssim": 0.9843100119408369
     },
     {
       "library": "torch-radon",
       "size": 256,
       "angles": 360,
       "phantom": "disc",
-      "psnr_db": 34.77801513671875,
-      "ssim": 0.9548670410473347
+      "psnr_db": 34.91437530517578,
+      "ssim": 0.9861568214502334
     },
     {
       "library": "torchtomo",
       "size": 512,
       "angles": 90,
       "phantom": "shepp-logan",
-      "psnr_db": 23.138690948486328,
-      "ssim": 0.4741854545748779
+      "psnr_db": 24.48082160949707,
+      "ssim": 0.5341360794934404
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 512,
+      "angles": 90,
+      "phantom": "shepp-logan",
+      "psnr_db": 24.480823516845703,
+      "ssim": 0.5341360517314026
     },
     {
       "library": "leap",
       "size": 512,
       "angles": 90,
       "phantom": "shepp-logan",
-      "psnr_db": 24.173810958862305,
-      "ssim": 0.5119071805628548
+      "psnr_db": 24.201257705688477,
+      "ssim": 0.511209866036443
     },
     {
       "library": "torch-radon",
       "size": 512,
       "angles": 90,
       "phantom": "shepp-logan",
-      "psnr_db": 23.409000396728516,
-      "ssim": 0.51418208296047
+      "psnr_db": 24.48322296142578,
+      "ssim": 0.5344355851288864
     },
     {
       "library": "torchtomo",
       "size": 512,
       "angles": 90,
       "phantom": "disc",
-      "psnr_db": 27.71629524230957,
-      "ssim": 0.4210604710061653
+      "psnr_db": 28.384281158447266,
+      "ssim": 0.5284014546377822
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 512,
+      "angles": 90,
+      "phantom": "disc",
+      "psnr_db": 28.384258270263672,
+      "ssim": 0.5284003740631263
     },
     {
       "library": "leap",
       "size": 512,
       "angles": 90,
       "phantom": "disc",
-      "psnr_db": 28.11309051513672,
-      "ssim": 0.5121802715417494
+      "psnr_db": 28.146121978759766,
+      "ssim": 0.5123179210750912
     },
     {
       "library": "torch-radon",
       "size": 512,
       "angles": 90,
       "phantom": "disc",
-      "psnr_db": 27.948625564575195,
-      "ssim": 0.4560733881933673
+      "psnr_db": 28.39521026611328,
+      "ssim": 0.5289753898468333
     },
     {
       "library": "torchtomo",
       "size": 512,
       "angles": 180,
       "phantom": "shepp-logan",
-      "psnr_db": 27.132381439208984,
-      "ssim": 0.5915671699936211
+      "psnr_db": 28.479005813598633,
+      "ssim": 0.7454924270271277
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 512,
+      "angles": 180,
+      "phantom": "shepp-logan",
+      "psnr_db": 28.47901153564453,
+      "ssim": 0.7454925499053414
     },
     {
       "library": "leap",
       "size": 512,
       "angles": 180,
       "phantom": "shepp-logan",
-      "psnr_db": 28.361452102661133,
-      "ssim": 0.7163962002951331
+      "psnr_db": 28.386070251464844,
+      "ssim": 0.7144674297773724
     },
     {
       "library": "torch-radon",
       "size": 512,
       "angles": 180,
       "phantom": "shepp-logan",
-      "psnr_db": 27.85260772705078,
-      "ssim": 0.7190687585355723
+      "psnr_db": 28.47755241394043,
+      "ssim": 0.7454435710507166
     },
     {
       "library": "torchtomo",
       "size": 512,
       "angles": 180,
       "phantom": "disc",
-      "psnr_db": 32.388771057128906,
-      "ssim": 0.5928792467550461
+      "psnr_db": 33.52912521362305,
+      "ssim": 0.8487183698492876
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 512,
+      "angles": 180,
+      "phantom": "disc",
+      "psnr_db": 33.52912902832031,
+      "ssim": 0.8487180270883188
     },
     {
       "library": "leap",
       "size": 512,
       "angles": 180,
       "phantom": "disc",
-      "psnr_db": 33.2644157409668,
-      "ssim": 0.826816516536936
+      "psnr_db": 33.31327438354492,
+      "ssim": 0.828627462369419
     },
     {
       "library": "torch-radon",
       "size": 512,
       "angles": 180,
       "phantom": "disc",
-      "psnr_db": 33.134517669677734,
-      "ssim": 0.7706630766646501
+      "psnr_db": 33.53002166748047,
+      "ssim": 0.8489749397911119
     },
     {
       "library": "torchtomo",
       "size": 512,
       "angles": 360,
       "phantom": "shepp-logan",
-      "psnr_db": 28.776222229003906,
-      "ssim": 0.6820949148926112
+      "psnr_db": 30.078794479370117,
+      "ssim": 0.9086723454788062
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 512,
+      "angles": 360,
+      "phantom": "shepp-logan",
+      "psnr_db": 30.078794479370117,
+      "ssim": 0.9086723249888365
     },
     {
       "library": "leap",
       "size": 512,
       "angles": 360,
       "phantom": "shepp-logan",
-      "psnr_db": 30.308509826660156,
-      "ssim": 0.8863844614893387
+      "psnr_db": 30.347640991210938,
+      "ssim": 0.8861072394969542
     },
     {
       "library": "torch-radon",
       "size": 512,
       "angles": 360,
       "phantom": "shepp-logan",
-      "psnr_db": 29.871440887451172,
-      "ssim": 0.8835866255327833
+      "psnr_db": 30.07948112487793,
+      "ssim": 0.9086708549233862
     },
     {
       "library": "torchtomo",
       "size": 512,
       "angles": 360,
       "phantom": "disc",
-      "psnr_db": 34.39277267456055,
-      "ssim": 0.6498566080565279
+      "psnr_db": 35.79707717895508,
+      "ssim": 0.9763102425746203
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 512,
+      "angles": 360,
+      "phantom": "disc",
+      "psnr_db": 35.79709243774414,
+      "ssim": 0.9763102576951498
     },
     {
       "library": "leap",
       "size": 512,
       "angles": 360,
       "phantom": "disc",
-      "psnr_db": 35.87058639526367,
-      "ssim": 0.9690059050385064
+      "psnr_db": 35.873008728027344,
+      "ssim": 0.9690876198760309
     },
     {
       "library": "torch-radon",
       "size": 512,
       "angles": 360,
       "phantom": "disc",
-      "psnr_db": 35.64527130126953,
-      "ssim": 0.9440276281706915
+      "psnr_db": 35.79124069213867,
+      "ssim": 0.9762239585380469
     }
   ],
   "agreement": [
     {
+      "library": "torchtomo-cuda",
+      "size": 256,
+      "angles": 90,
+      "phantom": "shepp-logan",
+      "scale_to_torchtomo": 1.0000001192092896,
+      "relative_l2_after_scale": 6.147678277557134e-07
+    },
+    {
       "library": "leap",
       "size": 256,
       "angles": 90,
       "phantom": "shepp-logan",
-      "scale_to_torchtomo": 0.9999608993530273,
-      "relative_l2_after_scale": 0.001980846282094717
+      "scale_to_torchtomo": 0.9999546408653259,
+      "relative_l2_after_scale": 0.001963462447747588
     },
     {
       "library": "torch-radon",
       "size": 256,
       "angles": 90,
       "phantom": "shepp-logan",
-      "scale_to_torchtomo": 0.007812652736902237,
-      "relative_l2_after_scale": 0.0017443164251744747
+      "scale_to_torchtomo": 0.007812583819031715,
+      "relative_l2_after_scale": 0.001776170451194048
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 256,
+      "angles": 90,
+      "phantom": "disc",
+      "scale_to_torchtomo": 1.0000003576278687,
+      "relative_l2_after_scale": 4.238625024299836e-07
     },
     {
       "library": "leap",
       "size": 256,
       "angles": 90,
       "phantom": "disc",
-      "scale_to_torchtomo": 0.9999897480010986,
-      "relative_l2_after_scale": 0.0009678773931227624
+      "scale_to_torchtomo": 1.000016689300537,
+      "relative_l2_after_scale": 0.000957464799284935
     },
     {
       "library": "torch-radon",
       "size": 256,
       "angles": 90,
       "phantom": "disc",
-      "scale_to_torchtomo": 0.00781261082738638,
-      "relative_l2_after_scale": 0.0008644823101349175
+      "scale_to_torchtomo": 0.007812692783772945,
+      "relative_l2_after_scale": 0.0008881185203790665
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 256,
+      "angles": 180,
+      "phantom": "shepp-logan",
+      "scale_to_torchtomo": 1.0000001192092896,
+      "relative_l2_after_scale": 6.162331942505261e-07
     },
     {
       "library": "leap",
       "size": 256,
       "angles": 180,
       "phantom": "shepp-logan",
-      "scale_to_torchtomo": 0.9999601244926453,
-      "relative_l2_after_scale": 0.0018925658660009503
+      "scale_to_torchtomo": 0.9999596476554871,
+      "relative_l2_after_scale": 0.0019359703874215484
     },
     {
       "library": "torch-radon",
       "size": 256,
       "angles": 180,
       "phantom": "shepp-logan",
-      "scale_to_torchtomo": 0.007812520489096642,
-      "relative_l2_after_scale": 0.0017326162196695805
+      "scale_to_torchtomo": 0.00781252421438694,
+      "relative_l2_after_scale": 0.0017701620236039162
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 256,
+      "angles": 180,
+      "phantom": "disc",
+      "scale_to_torchtomo": 1.000000238418579,
+      "relative_l2_after_scale": 4.178321262315876e-07
     },
     {
       "library": "leap",
       "size": 256,
       "angles": 180,
       "phantom": "disc",
-      "scale_to_torchtomo": 0.9999904632568359,
-      "relative_l2_after_scale": 0.0009789506439119577
+      "scale_to_torchtomo": 0.9999949336051941,
+      "relative_l2_after_scale": 0.0009917860152199864
     },
     {
       "library": "torch-radon",
       "size": 256,
       "angles": 180,
       "phantom": "disc",
-      "scale_to_torchtomo": 0.007812589406967163,
-      "relative_l2_after_scale": 0.0008932491764426231
+      "scale_to_torchtomo": 0.007812597788870335,
+      "relative_l2_after_scale": 0.0009284880943596363
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 256,
+      "angles": 360,
+      "phantom": "shepp-logan",
+      "scale_to_torchtomo": 1.0000001192092896,
+      "relative_l2_after_scale": 6.253953301893489e-07
     },
     {
       "library": "leap",
       "size": 256,
       "angles": 360,
       "phantom": "shepp-logan",
-      "scale_to_torchtomo": 0.9999589323997498,
-      "relative_l2_after_scale": 0.0019460424082353711
+      "scale_to_torchtomo": 0.999948263168335,
+      "relative_l2_after_scale": 0.0019493972649797797
     },
     {
       "library": "torch-radon",
       "size": 256,
       "angles": 360,
       "phantom": "shepp-logan",
-      "scale_to_torchtomo": 0.007812474388629198,
-      "relative_l2_after_scale": 0.0017716239672154188
+      "scale_to_torchtomo": 0.0078124613501131535,
+      "relative_l2_after_scale": 0.0017625205218791962
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 256,
+      "angles": 360,
+      "phantom": "disc",
+      "scale_to_torchtomo": 1.000000238418579,
+      "relative_l2_after_scale": 4.1606725176279724e-07
     },
     {
       "library": "leap",
       "size": 256,
       "angles": 360,
       "phantom": "disc",
-      "scale_to_torchtomo": 0.9999930262565613,
-      "relative_l2_after_scale": 0.0009876262629404664
+      "scale_to_torchtomo": 0.9999890327453613,
+      "relative_l2_after_scale": 0.0009890971705317497
     },
     {
       "library": "torch-radon",
       "size": 256,
       "angles": 360,
       "phantom": "disc",
-      "scale_to_torchtomo": 0.007812601514160633,
-      "relative_l2_after_scale": 0.0009026642073877156
+      "scale_to_torchtomo": 0.007812580093741417,
+      "relative_l2_after_scale": 0.0008963232976384461
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 512,
+      "angles": 90,
+      "phantom": "shepp-logan",
+      "scale_to_torchtomo": 1.0000001192092896,
+      "relative_l2_after_scale": 6.29090322945558e-07
     },
     {
       "library": "leap",
       "size": 512,
       "angles": 90,
       "phantom": "shepp-logan",
-      "scale_to_torchtomo": 0.9999828338623047,
-      "relative_l2_after_scale": 0.0009789097821339965
+      "scale_to_torchtomo": 0.999973475933075,
+      "relative_l2_after_scale": 0.0009504928602837026
     },
     {
       "library": "torch-radon",
       "size": 512,
       "angles": 90,
       "phantom": "shepp-logan",
-      "scale_to_torchtomo": 0.003906234400346875,
-      "relative_l2_after_scale": 0.0008843105752021074
+      "scale_to_torchtomo": 0.0039061950519680977,
+      "relative_l2_after_scale": 0.0008933194912970066
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 512,
+      "angles": 90,
+      "phantom": "disc",
+      "scale_to_torchtomo": 1.0,
+      "relative_l2_after_scale": 2.905330802605022e-07
     },
     {
       "library": "leap",
       "size": 512,
       "angles": 90,
       "phantom": "disc",
-      "scale_to_torchtomo": 0.9999896883964539,
-      "relative_l2_after_scale": 0.00046552688581869006
+      "scale_to_torchtomo": 1.0000134706497192,
+      "relative_l2_after_scale": 0.0004471165593713522
     },
     {
       "library": "torch-radon",
       "size": 512,
       "angles": 90,
       "phantom": "disc",
-      "scale_to_torchtomo": 0.003906246507540345,
-      "relative_l2_after_scale": 0.000451996544143185
+      "scale_to_torchtomo": 0.003906384110450745,
+      "relative_l2_after_scale": 0.0004773053515236825
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 512,
+      "angles": 180,
+      "phantom": "shepp-logan",
+      "scale_to_torchtomo": 1.0000001192092896,
+      "relative_l2_after_scale": 6.393368607859884e-07
     },
     {
       "library": "leap",
       "size": 512,
       "angles": 180,
       "phantom": "shepp-logan",
-      "scale_to_torchtomo": 0.9999775886535645,
-      "relative_l2_after_scale": 0.0009593858849257231
+      "scale_to_torchtomo": 0.9999803900718689,
+      "relative_l2_after_scale": 0.0009520183666609228
     },
     {
       "library": "torch-radon",
       "size": 512,
       "angles": 180,
       "phantom": "shepp-logan",
-      "scale_to_torchtomo": 0.0039062262512743473,
-      "relative_l2_after_scale": 0.0008790266583673656
+      "scale_to_torchtomo": 0.0039062362629920244,
+      "relative_l2_after_scale": 0.0009004749590530992
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 512,
+      "angles": 180,
+      "phantom": "disc",
+      "scale_to_torchtomo": 0.9999998807907104,
+      "relative_l2_after_scale": 2.874602955671435e-07
     },
     {
       "library": "leap",
       "size": 512,
       "angles": 180,
       "phantom": "disc",
-      "scale_to_torchtomo": 1.000002384185791,
-      "relative_l2_after_scale": 0.0004614570352714509
+      "scale_to_torchtomo": 1.0000044107437134,
+      "relative_l2_after_scale": 0.00047060917131602764
     },
     {
       "library": "torch-radon",
       "size": 512,
       "angles": 180,
       "phantom": "disc",
-      "scale_to_torchtomo": 0.003906292840838432,
-      "relative_l2_after_scale": 0.00046918922453187406
+      "scale_to_torchtomo": 0.00390630355104804,
+      "relative_l2_after_scale": 0.00048510226770304143
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 512,
+      "angles": 360,
+      "phantom": "shepp-logan",
+      "scale_to_torchtomo": 1.0000001192092896,
+      "relative_l2_after_scale": 6.408866966012283e-07
     },
     {
       "library": "leap",
       "size": 512,
       "angles": 360,
       "phantom": "shepp-logan",
-      "scale_to_torchtomo": 0.99998539686203,
-      "relative_l2_after_scale": 0.00095396424876526
+      "scale_to_torchtomo": 0.9999807476997375,
+      "relative_l2_after_scale": 0.0009673974709585309
     },
     {
       "library": "torch-radon",
       "size": 512,
       "angles": 360,
       "phantom": "shepp-logan",
-      "scale_to_torchtomo": 0.0039062437135726213,
-      "relative_l2_after_scale": 0.0008872527978383005
+      "scale_to_torchtomo": 0.003906229045242071,
+      "relative_l2_after_scale": 0.0008956362726166844
+    },
+    {
+      "library": "torchtomo-cuda",
+      "size": 512,
+      "angles": 360,
+      "phantom": "disc",
+      "scale_to_torchtomo": 0.9999999403953552,
+      "relative_l2_after_scale": 2.899604680806078e-07
     },
     {
       "library": "leap",
       "size": 512,
       "angles": 360,
       "phantom": "disc",
-      "scale_to_torchtomo": 1.0000019073486328,
-      "relative_l2_after_scale": 0.0004682846774812788
+      "scale_to_torchtomo": 1.0000008344650269,
+      "relative_l2_after_scale": 0.0004659548285417259
     },
     {
       "library": "torch-radon",
@@ -487,7 +681,7 @@
       "angles": 360,
       "phantom": "disc",
       "scale_to_torchtomo": 0.00390629144385457,
-      "relative_l2_after_scale": 0.0004693664377555251
+      "relative_l2_after_scale": 0.0004678771656472236
     }
   ],
   "performance": [
@@ -497,8 +691,8 @@
       "size": 256,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 0.3029687999514863,
-      "images_per_second": 3300.6699044922375,
+      "milliseconds": 0.3083518997300416,
+      "images_per_second": 3243.0479620053843,
       "torch_peak_mb": 24.039424,
       "driver_delta_mb": 25.165824
     },
@@ -508,10 +702,10 @@
       "size": 256,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 1.0658989001967711,
-      "images_per_second": 938.1752808032678,
-      "torch_peak_mb": 72.706048,
-      "driver_delta_mb": 75.497472
+      "milliseconds": 0.8523704498657025,
+      "images_per_second": 1173.1988129780398,
+      "torch_peak_mb": 97.347584,
+      "driver_delta_mb": 96.468992
     },
     {
       "library": "torchtomo",
@@ -519,10 +713,43 @@
       "size": 256,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 0.23474615009035915,
-      "images_per_second": 4259.920768093863,
+      "milliseconds": 0.23442469973815605,
+      "images_per_second": 4265.762102359367,
       "torch_peak_mb": 24.209408,
-      "driver_delta_mb": 27.262976
+      "driver_delta_mb": 25.165824
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "forward",
+      "size": 256,
+      "angles": 90,
+      "batch": 1,
+      "milliseconds": 0.1205274005769752,
+      "images_per_second": 8296.868556136717,
+      "torch_peak_mb": 0.354304,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "backproject",
+      "size": 256,
+      "angles": 90,
+      "batch": 1,
+      "milliseconds": 0.2371887007029727,
+      "images_per_second": 4216.052438569925,
+      "torch_peak_mb": 0.262144,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "fbp",
+      "size": 256,
+      "angles": 90,
+      "batch": 1,
+      "milliseconds": 0.20627664925996214,
+      "images_per_second": 4847.858463803823,
+      "torch_peak_mb": 0.925696,
+      "driver_delta_mb": 0.0
     },
     {
       "library": "leap",
@@ -530,8 +757,8 @@
       "size": 256,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 0.40894555022532586,
-      "images_per_second": 2445.3133172594926,
+      "milliseconds": 0.40206669946201146,
+      "images_per_second": 2487.149523544372,
       "torch_peak_mb": 0.354304,
       "driver_delta_mb": 0.0
     },
@@ -541,8 +768,8 @@
       "size": 256,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 0.3286414001195226,
-      "images_per_second": 3042.830269212318,
+      "milliseconds": 0.32521444954909384,
+      "images_per_second": 3074.894124127906,
       "torch_peak_mb": 0.524288,
       "driver_delta_mb": 0.0
     },
@@ -552,8 +779,8 @@
       "size": 256,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 2.459261600233731,
-      "images_per_second": 406.6261189557707,
+      "milliseconds": 2.4677762005012482,
+      "images_per_second": 405.2231315776863,
       "torch_peak_mb": 0.524288,
       "driver_delta_mb": 0.0
     },
@@ -563,8 +790,8 @@
       "size": 256,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 0.03532859991537407,
-      "images_per_second": 28305.6787530611,
+      "milliseconds": 0.03530260000843555,
+      "images_per_second": 28326.525518263534,
       "torch_peak_mb": 0.09216,
       "driver_delta_mb": 0.0
     },
@@ -574,8 +801,8 @@
       "size": 256,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 0.03055404995393474,
-      "images_per_second": 32728.885418059624,
+      "milliseconds": 0.02973360096802935,
+      "images_per_second": 33631.9842684119,
       "torch_peak_mb": 0.262144,
       "driver_delta_mb": 0.0
     },
@@ -585,8 +812,8 @@
       "size": 256,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 0.18279299983987585,
-      "images_per_second": 5470.669012905232,
+      "milliseconds": 0.18901205039583147,
+      "images_per_second": 5290.667964850851,
       "torch_peak_mb": 1.291264,
       "driver_delta_mb": 0.0
     },
@@ -596,8 +823,8 @@
       "size": 256,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 0.9958696999092354,
-      "images_per_second": 4016.5897208887513,
+      "milliseconds": 0.8762330500758253,
+      "images_per_second": 4564.995579262683,
       "torch_peak_mb": 95.68256,
       "driver_delta_mb": 94.37184
     },
@@ -607,10 +834,10 @@
       "size": 256,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 3.3284374498180114,
-      "images_per_second": 1201.7651105982802,
-      "torch_peak_mb": 105.22624,
-      "driver_delta_mb": 130.023424
+      "milliseconds": 1.9226075994083658,
+      "images_per_second": 2080.507744394072,
+      "torch_peak_mb": 70.516736,
+      "driver_delta_mb": 69.206016
     },
     {
       "library": "torchtomo",
@@ -618,10 +845,43 @@
       "size": 256,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 0.5165054000826785,
-      "images_per_second": 7744.352719951637,
+      "milliseconds": 0.5157300009159371,
+      "images_per_second": 7755.996340907055,
       "torch_peak_mb": 95.789056,
-      "driver_delta_mb": 69.206016
+      "driver_delta_mb": 96.468992
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "forward",
+      "size": 256,
+      "angles": 90,
+      "batch": 4,
+      "milliseconds": 0.15487195050809532,
+      "images_per_second": 25827.788614252106,
+      "torch_peak_mb": 1.417216,
+      "driver_delta_mb": 2.097152
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "backproject",
+      "size": 256,
+      "angles": 90,
+      "batch": 4,
+      "milliseconds": 0.17642299935687333,
+      "images_per_second": 22672.780842528868,
+      "torch_peak_mb": 1.417216,
+      "driver_delta_mb": 2.097152
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "fbp",
+      "size": 256,
+      "angles": 90,
+      "batch": 4,
+      "milliseconds": 0.22200215025804937,
+      "images_per_second": 18017.843499941362,
+      "torch_peak_mb": 3.698688,
+      "driver_delta_mb": 4.194304
     },
     {
       "library": "leap",
@@ -629,8 +889,8 @@
       "size": 256,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 0.5080913499114104,
-      "images_per_second": 7872.600076142667,
+      "milliseconds": 0.4925144501612521,
+      "images_per_second": 8121.589120259064,
       "torch_peak_mb": 1.785856,
       "driver_delta_mb": 2.097152
     },
@@ -640,8 +900,8 @@
       "size": 256,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 0.4065880501002539,
-      "images_per_second": 9837.967443985885,
+      "milliseconds": 0.3974191509769298,
+      "images_per_second": 10064.940227885998,
       "torch_peak_mb": 2.097152,
       "driver_delta_mb": 2.097152
     },
@@ -651,8 +911,8 @@
       "size": 256,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 2.1851598998182453,
-      "images_per_second": 1830.5296561284633,
+      "milliseconds": 2.161368749511894,
+      "images_per_second": 1850.6791129016406,
       "torch_peak_mb": 2.097152,
       "driver_delta_mb": 2.097152
     },
@@ -662,8 +922,8 @@
       "size": 256,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 0.07413320017803926,
-      "images_per_second": 53956.9314476314,
+      "milliseconds": 0.07443770009558648,
+      "images_per_second": 53736.21155494521,
       "torch_peak_mb": 0.36864,
       "driver_delta_mb": 0.0
     },
@@ -673,8 +933,8 @@
       "size": 256,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 0.05381615010264795,
-      "images_per_second": 74327.1302828328,
+      "milliseconds": 0.054008650477044284,
+      "images_per_second": 74062.20975101295,
       "torch_peak_mb": 1.048576,
       "driver_delta_mb": 0.0
     },
@@ -684,9 +944,273 @@
       "size": 256,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 0.1800030000595143,
-      "images_per_second": 22221.851850677387,
+      "milliseconds": 0.2520357506000437,
+      "images_per_second": 15870.764327984614,
       "torch_peak_mb": 5.164032,
+      "driver_delta_mb": 20.97152
+    },
+    {
+      "library": "torchtomo",
+      "operation": "forward",
+      "size": 256,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.4554928498691879,
+      "images_per_second": 2195.4241439513003,
+      "torch_peak_mb": 48.86528,
+      "driver_delta_mb": 48.234496
+    },
+    {
+      "library": "torchtomo",
+      "operation": "backproject",
+      "size": 256,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 1.3081982993753627,
+      "images_per_second": 764.4101054690861,
+      "torch_peak_mb": 189.714432,
+      "driver_delta_mb": 188.74368
+    },
+    {
+      "library": "torchtomo",
+      "operation": "fbp",
+      "size": 256,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.3910816492862068,
+      "images_per_second": 2557.010797681704,
+      "torch_peak_mb": 48.943104,
+      "driver_delta_mb": 48.234496
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "forward",
+      "size": 256,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.16248249885393307,
+      "images_per_second": 6154.508990528083,
+      "torch_peak_mb": 0.446464,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "backproject",
+      "size": 256,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.3383324496098794,
+      "images_per_second": 2955.6727448196852,
+      "torch_peak_mb": 0.262144,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "fbp",
+      "size": 256,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.20835059985984117,
+      "images_per_second": 4799.602212197645,
+      "torch_peak_mb": 1.849344,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "leap",
+      "operation": "forward",
+      "size": 256,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.38927160057937726,
+      "images_per_second": 2568.9004759443983,
+      "torch_peak_mb": 0.446464,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "leap",
+      "operation": "backproject",
+      "size": 256,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.3428769501624629,
+      "images_per_second": 2916.4981767545974,
+      "torch_peak_mb": 0.524288,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "leap",
+      "operation": "fbp",
+      "size": 256,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 2.3493792992667295,
+      "images_per_second": 425.64433946962606,
+      "torch_peak_mb": 0.630784,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torch-radon",
+      "operation": "forward",
+      "size": 256,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.03521010075928643,
+      "images_per_second": 28400.941162778596,
+      "torch_peak_mb": 0.18432,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torch-radon",
+      "operation": "backproject",
+      "size": 256,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.03014209942193702,
+      "images_per_second": 33176.18942203519,
+      "torch_peak_mb": 0.262144,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torch-radon",
+      "operation": "fbp",
+      "size": 256,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.18173254939028993,
+      "images_per_second": 5502.591601531952,
+      "torch_peak_mb": 2.582016,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo",
+      "operation": "forward",
+      "size": 256,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 1.5152538995607756,
+      "images_per_second": 2639.821617459275,
+      "torch_peak_mb": 135.528448,
+      "driver_delta_mb": 134.217728
+    },
+    {
+      "library": "torchtomo",
+      "operation": "backproject",
+      "size": 256,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 3.899800850194879,
+      "images_per_second": 1025.6934017028366,
+      "torch_peak_mb": 70.516736,
+      "driver_delta_mb": 35.651584
+    },
+    {
+      "library": "torchtomo",
+      "operation": "fbp",
+      "size": 256,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 0.9781363507499918,
+      "images_per_second": 4089.409413046531,
+      "torch_peak_mb": 136.003584,
+      "driver_delta_mb": 136.31488
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "forward",
+      "size": 256,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 0.2920778511906974,
+      "images_per_second": 13694.978868453818,
+      "torch_peak_mb": 1.785856,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "backproject",
+      "size": 256,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 0.3451240001595579,
+      "images_per_second": 11590.037198661114,
+      "torch_peak_mb": 1.785856,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "fbp",
+      "size": 256,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 0.2296166989253834,
+      "images_per_second": 17420.335797527714,
+      "torch_peak_mb": 7.397376,
+      "driver_delta_mb": 20.97152
+    },
+    {
+      "library": "leap",
+      "operation": "forward",
+      "size": 256,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 0.6080522507545538,
+      "images_per_second": 6578.382030551251,
+      "torch_peak_mb": 2.523136,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "leap",
+      "operation": "backproject",
+      "size": 256,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 0.5206885005463846,
+      "images_per_second": 7682.136240386718,
+      "torch_peak_mb": 2.097152,
+      "driver_delta_mb": 2.097152
+    },
+    {
+      "library": "leap",
+      "operation": "fbp",
+      "size": 256,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 2.8646413004025817,
+      "images_per_second": 1396.3353804323988,
+      "torch_peak_mb": 2.523136,
+      "driver_delta_mb": 2.097152
+    },
+    {
+      "library": "torch-radon",
+      "operation": "forward",
+      "size": 256,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 0.10644184949342161,
+      "images_per_second": 37579.20422312101,
+      "torch_peak_mb": 0.73728,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torch-radon",
+      "operation": "backproject",
+      "size": 256,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 0.09968679951271042,
+      "images_per_second": 40125.67380588827,
+      "torch_peak_mb": 1.048576,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torch-radon",
+      "operation": "fbp",
+      "size": 256,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 0.1776205506757833,
+      "images_per_second": 22519.916669447404,
+      "torch_peak_mb": 10.328064,
       "driver_delta_mb": 20.97152
     },
     {
@@ -695,8 +1219,8 @@
       "size": 256,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 0.913918449805351,
-      "images_per_second": 1094.1895310385548,
+      "milliseconds": 0.9123956493567675,
+      "images_per_second": 1096.0157478885317,
       "torch_peak_mb": 94.896128,
       "driver_delta_mb": 94.37184
     },
@@ -706,10 +1230,10 @@
       "size": 256,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 3.09851184974832,
-      "images_per_second": 322.73557387919175,
-      "torch_peak_mb": 202.743808,
-      "driver_delta_mb": 228.589568
+      "milliseconds": 2.687565299856942,
+      "images_per_second": 372.08398250015716,
+      "torch_peak_mb": 269.484032,
+      "driver_delta_mb": 268.435456
     },
     {
       "library": "torchtomo",
@@ -717,10 +1241,43 @@
       "size": 256,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 1.7477646499173716,
-      "images_per_second": 572.1594151977365,
+      "milliseconds": 1.7471120998379774,
+      "images_per_second": 572.3731179543302,
       "torch_peak_mb": 269.06624,
-      "driver_delta_mb": 270.532608
+      "driver_delta_mb": 272.62976
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "forward",
+      "size": 256,
+      "angles": 360,
+      "batch": 1,
+      "milliseconds": 0.30192190024536103,
+      "images_per_second": 3312.114819055312,
+      "torch_peak_mb": 0.630784,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "backproject",
+      "size": 256,
+      "angles": 360,
+      "batch": 1,
+      "milliseconds": 0.6533093997859396,
+      "images_per_second": 1530.6683178409119,
+      "torch_peak_mb": 0.262144,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "fbp",
+      "size": 256,
+      "angles": 360,
+      "batch": 1,
+      "milliseconds": 0.20716110011562705,
+      "images_per_second": 4827.161081119233,
+      "torch_peak_mb": 3.698688,
+      "driver_delta_mb": 4.194304
     },
     {
       "library": "leap",
@@ -728,10 +1285,10 @@
       "size": 256,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 0.45285119995241985,
-      "images_per_second": 2208.2308716529137,
+      "milliseconds": 0.44652330107055604,
+      "images_per_second": 2239.524785386257,
       "torch_peak_mb": 0.630784,
-      "driver_delta_mb": 2.097152
+      "driver_delta_mb": 0.0
     },
     {
       "library": "leap",
@@ -739,10 +1296,10 @@
       "size": 256,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 0.42251714985468425,
-      "images_per_second": 2366.767834971737,
+      "milliseconds": 0.41852419963106513,
+      "images_per_second": 2389.348097150688,
       "torch_peak_mb": 0.524288,
-      "driver_delta_mb": 2.097152
+      "driver_delta_mb": 0.0
     },
     {
       "library": "leap",
@@ -750,10 +1307,10 @@
       "size": 256,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 3.449838300002739,
-      "images_per_second": 289.86865848153116,
+      "milliseconds": 3.4405059996061027,
+      "images_per_second": 290.6549211408113,
       "torch_peak_mb": 0.999424,
-      "driver_delta_mb": 2.097152
+      "driver_delta_mb": 0.0
     },
     {
       "library": "torch-radon",
@@ -761,8 +1318,8 @@
       "size": 256,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 0.06332865013973787,
-      "images_per_second": 15790.641325741972,
+      "milliseconds": 0.06201220094226301,
+      "images_per_second": 16125.858860114618,
       "torch_peak_mb": 0.36864,
       "driver_delta_mb": 0.0
     },
@@ -772,8 +1329,8 @@
       "size": 256,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 0.054809649736853316,
-      "images_per_second": 18244.962425432408,
+      "milliseconds": 0.05437219952000305,
+      "images_per_second": 18391.75182957439,
       "torch_peak_mb": 0.262144,
       "driver_delta_mb": 0.0
     },
@@ -783,10 +1340,10 @@
       "size": 256,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 0.18719104991760105,
-      "images_per_second": 5342.1357508288265,
+      "milliseconds": 0.1826980005716905,
+      "images_per_second": 5473.51365023615,
       "torch_peak_mb": 5.164032,
-      "driver_delta_mb": 23.068672
+      "driver_delta_mb": 20.97152
     },
     {
       "library": "torchtomo",
@@ -794,8 +1351,8 @@
       "size": 256,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 3.0408281498239376,
-      "images_per_second": 1315.4311269552006,
+      "milliseconds": 3.024654250475578,
+      "images_per_second": 1322.4652038728277,
       "torch_peak_mb": 136.31488,
       "driver_delta_mb": 136.31488
     },
@@ -805,10 +1362,10 @@
       "size": 256,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 11.476352349927765,
-      "images_per_second": 348.5428015832205,
-      "torch_peak_mb": 137.363456,
-      "driver_delta_mb": 138.412032
+      "milliseconds": 7.907288499700371,
+      "images_per_second": 505.8624078470857,
+      "torch_peak_mb": 70.516736,
+      "driver_delta_mb": 35.651584
     },
     {
       "library": "torchtomo",
@@ -816,10 +1373,43 @@
       "size": 256,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 2.8858043002401246,
-      "images_per_second": 1386.095377176881,
+      "milliseconds": 2.8894338494865224,
+      "images_per_second": 1384.3542397452134,
       "torch_peak_mb": 170.295296,
       "driver_delta_mb": 203.423744
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "forward",
+      "size": 256,
+      "angles": 360,
+      "batch": 4,
+      "milliseconds": 0.5657891495502554,
+      "images_per_second": 7069.771492047155,
+      "torch_peak_mb": 2.523136,
+      "driver_delta_mb": 2.097152
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "backproject",
+      "size": 256,
+      "angles": 360,
+      "batch": 4,
+      "milliseconds": 0.682218000292778,
+      "images_per_second": 5863.2284669759165,
+      "torch_peak_mb": 2.523136,
+      "driver_delta_mb": 2.097152
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "fbp",
+      "size": 256,
+      "angles": 360,
+      "batch": 4,
+      "milliseconds": 0.22834964911453426,
+      "images_per_second": 17516.996481101243,
+      "torch_peak_mb": 15.555584,
+      "driver_delta_mb": 2.097152
     },
     {
       "library": "leap",
@@ -827,8 +1417,8 @@
       "size": 256,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 0.8675223001773702,
-      "images_per_second": 4610.832481403851,
+      "milliseconds": 0.8517644993844442,
+      "images_per_second": 4696.1337351940965,
       "torch_peak_mb": 3.997696,
       "driver_delta_mb": 0.0
     },
@@ -838,8 +1428,8 @@
       "size": 256,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 0.7435690000420436,
-      "images_per_second": 5379.46041291908,
+      "milliseconds": 0.7351880994974636,
+      "images_per_second": 5440.784477787647,
       "torch_peak_mb": 2.523136,
       "driver_delta_mb": 2.097152
     },
@@ -849,8 +1439,8 @@
       "size": 256,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 4.622802949961624,
-      "images_per_second": 865.2759036664554,
+      "milliseconds": 4.577766249713022,
+      "images_per_second": 873.788608199634,
       "torch_peak_mb": 3.997696,
       "driver_delta_mb": 2.097152
     },
@@ -860,8 +1450,8 @@
       "size": 256,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 0.1830574998166412,
-      "images_per_second": 21851.057749650157,
+      "milliseconds": 0.18029249913524836,
+      "images_per_second": 22186.169802878805,
       "torch_peak_mb": 1.47456,
       "driver_delta_mb": 0.0
     },
@@ -871,8 +1461,8 @@
       "size": 256,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 0.19538050000846852,
-      "images_per_second": 20472.872163939723,
+      "milliseconds": 0.19321704894537106,
+      "images_per_second": 20702.106888771155,
       "torch_peak_mb": 1.048576,
       "driver_delta_mb": 0.0
     },
@@ -882,8 +1472,8 @@
       "size": 256,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 0.30926684994483367,
-      "images_per_second": 12933.814279524337,
+      "milliseconds": 0.3064579010242596,
+      "images_per_second": 13052.363755775232,
       "torch_peak_mb": 20.655616,
       "driver_delta_mb": 0.0
     },
@@ -893,8 +1483,8 @@
       "size": 512,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 0.915108450135449,
-      "images_per_second": 1092.7666549816975,
+      "milliseconds": 0.9120221511693671,
+      "images_per_second": 1096.4645965208524,
       "torch_peak_mb": 95.551488,
       "driver_delta_mb": 94.37184
     },
@@ -904,10 +1494,10 @@
       "size": 512,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 3.2934578499407507,
-      "images_per_second": 303.63224476001415,
-      "torch_peak_mb": 205.705216,
-      "driver_delta_mb": 232.783872
+      "milliseconds": 2.7225569006986916,
+      "images_per_second": 367.3017815507802,
+      "torch_peak_mb": 271.712256,
+      "driver_delta_mb": 270.532608
     },
     {
       "library": "torchtomo",
@@ -915,10 +1505,43 @@
       "size": 512,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 1.7623637497308664,
-      "images_per_second": 567.4197509751955,
+      "milliseconds": 1.7650915993726812,
+      "images_per_second": 566.542835711984,
       "torch_peak_mb": 269.668352,
       "driver_delta_mb": 270.532608
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "forward",
+      "size": 512,
+      "angles": 90,
+      "batch": 1,
+      "milliseconds": 0.30620390025433153,
+      "images_per_second": 3265.797722267432,
+      "torch_peak_mb": 1.232896,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "backproject",
+      "size": 512,
+      "angles": 90,
+      "batch": 1,
+      "milliseconds": 0.4577888495987281,
+      "images_per_second": 2184.413187163784,
+      "torch_peak_mb": 1.048576,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "fbp",
+      "size": 512,
+      "angles": 90,
+      "batch": 1,
+      "milliseconds": 0.2063940992229618,
+      "images_per_second": 4845.0997570416375,
+      "torch_peak_mb": 1.847296,
+      "driver_delta_mb": 0.0
     },
     {
       "library": "leap",
@@ -926,8 +1549,8 @@
       "size": 512,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 0.5698370001482544,
-      "images_per_second": 1754.8878007918581,
+      "milliseconds": 0.5615825997665524,
+      "images_per_second": 1780.6819520684862,
       "torch_peak_mb": 1.232896,
       "driver_delta_mb": 0.0
     },
@@ -937,10 +1560,10 @@
       "size": 512,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 0.4122166497836588,
-      "images_per_second": 2425.9088043261327,
+      "milliseconds": 0.4119221994187683,
+      "images_per_second": 2427.642893272135,
       "torch_peak_mb": 2.097152,
-      "driver_delta_mb": 2.097152
+      "driver_delta_mb": 0.0
     },
     {
       "library": "leap",
@@ -948,10 +1571,10 @@
       "size": 512,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 2.9625579500134336,
-      "images_per_second": 337.5461398132197,
+      "milliseconds": 2.900375450553838,
+      "images_per_second": 344.78294863826886,
       "torch_peak_mb": 2.097152,
-      "driver_delta_mb": 2.097152
+      "driver_delta_mb": 0.0
     },
     {
       "library": "torch-radon",
@@ -959,8 +1582,8 @@
       "size": 512,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 0.06423265003832057,
-      "images_per_second": 15568.406400847698,
+      "milliseconds": 0.06370969931595027,
+      "images_per_second": 15696.197136966259,
       "torch_peak_mb": 0.18432,
       "driver_delta_mb": 0.0
     },
@@ -970,10 +1593,10 @@
       "size": 512,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 0.04623165004886687,
-      "images_per_second": 21630.203528167385,
+      "milliseconds": 0.04567514988593757,
+      "images_per_second": 21893.74315130336,
       "torch_peak_mb": 1.048576,
-      "driver_delta_mb": 2.097152
+      "driver_delta_mb": 0.0
     },
     {
       "library": "torch-radon",
@@ -981,10 +1604,10 @@
       "size": 512,
       "angles": 90,
       "batch": 1,
-      "milliseconds": 0.1859845498984214,
-      "images_per_second": 5376.790709476497,
+      "milliseconds": 0.1806490501621738,
+      "images_per_second": 5535.595117174829,
       "torch_peak_mb": 2.581504,
-      "driver_delta_mb": 4.194304
+      "driver_delta_mb": 0.0
     },
     {
       "library": "torchtomo",
@@ -992,8 +1615,8 @@
       "size": 512,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 3.287182349959039,
-      "images_per_second": 1216.8476142036486,
+      "milliseconds": 3.2664694997947663,
+      "images_per_second": 1224.5637071619133,
       "torch_peak_mb": 138.93632,
       "driver_delta_mb": 134.217728
     },
@@ -1003,10 +1626,10 @@
       "size": 512,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 12.42550589995517,
-      "images_per_second": 321.91848220960014,
-      "torch_peak_mb": 143.130624,
-      "driver_delta_mb": 134.217728
+      "milliseconds": 8.212835849553812,
+      "images_per_second": 487.0424873056865,
+      "torch_peak_mb": 79.822848,
+      "driver_delta_mb": 33.554432
     },
     {
       "library": "torchtomo",
@@ -1014,10 +1637,43 @@
       "size": 512,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 3.0927767998946365,
-      "images_per_second": 1293.3361373301398,
+      "milliseconds": 3.0915215000277385,
+      "images_per_second": 1293.8612912651943,
       "torch_peak_mb": 172.703744,
       "driver_delta_mb": 201.326592
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "forward",
+      "size": 512,
+      "angles": 90,
+      "batch": 4,
+      "milliseconds": 0.5793016505776905,
+      "images_per_second": 6904.86553250992,
+      "torch_peak_mb": 4.931584,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "backproject",
+      "size": 512,
+      "angles": 90,
+      "batch": 4,
+      "milliseconds": 0.4803014002391137,
+      "images_per_second": 8328.103973897716,
+      "torch_peak_mb": 4.931584,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "fbp",
+      "size": 512,
+      "angles": 90,
+      "batch": 4,
+      "milliseconds": 0.22742715082131326,
+      "images_per_second": 17588.049560286454,
+      "torch_peak_mb": 7.385088,
+      "driver_delta_mb": 0.0
     },
     {
       "library": "leap",
@@ -1025,8 +1681,8 @@
       "size": 512,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 1.1292035502265207,
-      "images_per_second": 3542.3197165804086,
+      "milliseconds": 1.1099782001110725,
+      "images_per_second": 3603.674378109166,
       "torch_peak_mb": 5.668864,
       "driver_delta_mb": 0.0
     },
@@ -1036,8 +1692,8 @@
       "size": 512,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 0.6196786998771131,
-      "images_per_second": 6454.958030336092,
+      "milliseconds": 0.6124952997197397,
+      "images_per_second": 6530.662360723887,
       "torch_peak_mb": 8.388608,
       "driver_delta_mb": 0.0
     },
@@ -1047,8 +1703,8 @@
       "size": 512,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 3.485925849963678,
-      "images_per_second": 1147.471338221861,
+      "milliseconds": 3.4437709997291677,
+      "images_per_second": 1161.5174180613567,
       "torch_peak_mb": 8.388608,
       "driver_delta_mb": 0.0
     },
@@ -1058,8 +1714,8 @@
       "size": 512,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 0.22725160015397705,
-      "images_per_second": 17601.636236179424,
+      "milliseconds": 0.22497565078083426,
+      "images_per_second": 17779.701874922906,
       "torch_peak_mb": 0.73728,
       "driver_delta_mb": 0.0
     },
@@ -1069,8 +1725,8 @@
       "size": 512,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 0.1630144499358721,
-      "images_per_second": 24537.70203545484,
+      "milliseconds": 0.15927600034046918,
+      "images_per_second": 25113.63916377596,
       "torch_peak_mb": 4.194304,
       "driver_delta_mb": 0.0
     },
@@ -1080,8 +1736,8 @@
       "size": 512,
       "angles": 90,
       "batch": 4,
-      "milliseconds": 0.21975855015625712,
-      "images_per_second": 18201.794638505944,
+      "milliseconds": 0.21682659862563014,
+      "images_per_second": 18447.92117458959,
       "torch_peak_mb": 10.324992,
       "driver_delta_mb": 0.0
     },
@@ -1089,10 +1745,274 @@
       "library": "torchtomo",
       "operation": "forward",
       "size": 512,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 2.8249112001503818,
+      "images_per_second": 353.99342816395995,
+      "torch_peak_mb": 286.524416,
+      "driver_delta_mb": 352.321536
+    },
+    {
+      "library": "torchtomo",
+      "operation": "backproject",
+      "size": 512,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 6.485616350255441,
+      "images_per_second": 154.18735028331028,
+      "torch_peak_mb": 354.550784,
+      "driver_delta_mb": 379.584512
+    },
+    {
+      "library": "torchtomo",
+      "operation": "fbp",
+      "size": 512,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 4.284720950818155,
+      "images_per_second": 233.3874274377315,
+      "torch_peak_mb": 471.179264,
+      "driver_delta_mb": 538.968064
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "forward",
+      "size": 512,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.5939187001786195,
+      "images_per_second": 1683.7321332014849,
+      "torch_peak_mb": 1.417216,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "backproject",
+      "size": 512,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.9123316500335932,
+      "images_per_second": 1096.092632501765,
+      "torch_peak_mb": 1.048576,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "fbp",
+      "size": 512,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.20400360081112012,
+      "images_per_second": 4901.874261160054,
+      "torch_peak_mb": 3.692544,
+      "driver_delta_mb": 2.097152
+    },
+    {
+      "library": "leap",
+      "operation": "forward",
+      "size": 512,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.6784724988392554,
+      "images_per_second": 1473.899092020414,
+      "torch_peak_mb": 1.417216,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "leap",
+      "operation": "backproject",
+      "size": 512,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.5649846498272382,
+      "images_per_second": 1769.9595914787799,
+      "torch_peak_mb": 2.097152,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "leap",
+      "operation": "fbp",
+      "size": 512,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 3.7201168001047336,
+      "images_per_second": 268.80876427639225,
+      "torch_peak_mb": 2.097152,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torch-radon",
+      "operation": "forward",
+      "size": 512,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.12071785022271797,
+      "images_per_second": 8283.779061299167,
+      "torch_peak_mb": 0.36864,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torch-radon",
+      "operation": "backproject",
+      "size": 512,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.08596375118941069,
+      "images_per_second": 11632.810180614633,
+      "torch_peak_mb": 1.048576,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torch-radon",
+      "operation": "fbp",
+      "size": 512,
+      "angles": 180,
+      "batch": 1,
+      "milliseconds": 0.18287900020368397,
+      "images_per_second": 5468.096385513025,
+      "torch_peak_mb": 5.162496,
+      "driver_delta_mb": 20.97152
+    },
+    {
+      "library": "torchtomo",
+      "operation": "forward",
+      "size": 512,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 7.642132700129878,
+      "images_per_second": 523.4140987805695,
+      "torch_peak_mb": 173.278208,
+      "driver_delta_mb": 201.326592
+    },
+    {
+      "library": "torchtomo",
+      "operation": "backproject",
+      "size": 512,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 17.363801950705238,
+      "images_per_second": 230.36429529406942,
+      "torch_peak_mb": 109.184,
+      "driver_delta_mb": 67.108864
+    },
+    {
+      "library": "torchtomo",
+      "operation": "fbp",
+      "size": 512,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 7.166067299840506,
+      "images_per_second": 558.1862174374259,
+      "torch_peak_mb": 173.441024,
+      "driver_delta_mb": 201.326592
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "forward",
+      "size": 512,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 1.1203697504242882,
+      "images_per_second": 3570.2499094474706,
+      "torch_peak_mb": 5.668864,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "backproject",
+      "size": 512,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 0.9507927999948151,
+      "images_per_second": 4207.015450707886,
+      "torch_peak_mb": 5.668864,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "fbp",
+      "size": 512,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 0.3039899005671032,
+      "images_per_second": 13158.331880558757,
+      "torch_peak_mb": 15.302656,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "leap",
+      "operation": "forward",
+      "size": 512,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 1.670546350942459,
+      "images_per_second": 2394.426229325126,
+      "torch_peak_mb": 7.143424,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "leap",
+      "operation": "backproject",
+      "size": 512,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 0.9536682497127913,
+      "images_per_second": 4194.330681769733,
+      "torch_peak_mb": 8.388608,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "leap",
+      "operation": "fbp",
+      "size": 512,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 4.740521749772597,
+      "images_per_second": 843.7889774879484,
+      "torch_peak_mb": 8.388608,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torch-radon",
+      "operation": "forward",
+      "size": 512,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 0.37123704969417304,
+      "images_per_second": 10774.786631062876,
+      "torch_peak_mb": 1.47456,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torch-radon",
+      "operation": "backproject",
+      "size": 512,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 0.31648994918214157,
+      "images_per_second": 12638.632001858548,
+      "torch_peak_mb": 4.194304,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torch-radon",
+      "operation": "fbp",
+      "size": 512,
+      "angles": 180,
+      "batch": 4,
+      "milliseconds": 0.4208657512208447,
+      "images_per_second": 9504.218360360343,
+      "torch_peak_mb": 21.20704,
+      "driver_delta_mb": 20.97152
+    },
+    {
+      "library": "torchtomo",
+      "operation": "forward",
+      "size": 512,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 8.197104049759218,
-      "images_per_second": 121.99430358937241,
+      "milliseconds": 8.177953750418965,
+      "images_per_second": 122.27997742696564,
       "torch_peak_mb": 471.335936,
       "driver_delta_mb": 536.870912
     },
@@ -1102,10 +2022,10 @@
       "size": 512,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 17.715701650013216,
-      "images_per_second": 56.44710098170195,
-      "torch_peak_mb": 640.287744,
-      "driver_delta_mb": 759.169024
+      "milliseconds": 15.771423350088298,
+      "images_per_second": 63.40581809278497,
+      "torch_peak_mb": 404.882432,
+      "driver_delta_mb": 404.750336
     },
     {
       "library": "torchtomo",
@@ -1113,10 +2033,43 @@
       "size": 512,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 8.557235050102463,
-      "images_per_second": 116.86017669784893,
+      "milliseconds": 8.55712235061219,
+      "images_per_second": 116.86171577626894,
       "torch_peak_mb": 471.547904,
-      "driver_delta_mb": 559.939584
+      "driver_delta_mb": 557.842432
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "forward",
+      "size": 512,
+      "angles": 360,
+      "batch": 1,
+      "milliseconds": 1.1670409003272653,
+      "images_per_second": 856.8679981306369,
+      "torch_peak_mb": 1.785856,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "backproject",
+      "size": 512,
+      "angles": 360,
+      "batch": 1,
+      "milliseconds": 1.893762500549201,
+      "images_per_second": 528.0493196533329,
+      "torch_peak_mb": 1.048576,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "fbp",
+      "size": 512,
+      "angles": 360,
+      "batch": 1,
+      "milliseconds": 0.2842668502125889,
+      "images_per_second": 3517.8213683802746,
+      "torch_peak_mb": 7.385088,
+      "driver_delta_mb": 20.97152
     },
     {
       "library": "leap",
@@ -1124,8 +2077,8 @@
       "size": 512,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 0.8813728996756254,
-      "images_per_second": 1134.593541925368,
+      "milliseconds": 0.9090346487937495,
+      "images_per_second": 1100.068079172733,
       "torch_peak_mb": 1.785856,
       "driver_delta_mb": 0.0
     },
@@ -1135,8 +2088,8 @@
       "size": 512,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 0.8476562499708962,
-      "images_per_second": 1179.7235023446526,
+      "milliseconds": 0.8665679997648112,
+      "images_per_second": 1153.9775300627332,
       "torch_peak_mb": 2.097152,
       "driver_delta_mb": 0.0
     },
@@ -1146,8 +2099,8 @@
       "size": 512,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 5.196485449778265,
-      "images_per_second": 192.4377561843592,
+      "milliseconds": 5.17395100032445,
+      "images_per_second": 193.2758930143118,
       "torch_peak_mb": 2.523136,
       "driver_delta_mb": 0.0
     },
@@ -1157,8 +2110,8 @@
       "size": 512,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 0.20213755014992785,
-      "images_per_second": 4947.126346679714,
+      "milliseconds": 0.20145809976384044,
+      "images_per_second": 4963.811339292149,
       "torch_peak_mb": 0.73728,
       "driver_delta_mb": 0.0
     },
@@ -1168,8 +2121,8 @@
       "size": 512,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 0.16525640021427535,
-      "images_per_second": 6051.2028502580015,
+      "milliseconds": 0.16459699982078746,
+      "images_per_second": 6075.444881065851,
       "torch_peak_mb": 1.048576,
       "driver_delta_mb": 0.0
     },
@@ -1179,8 +2132,8 @@
       "size": 512,
       "angles": 360,
       "batch": 1,
-      "milliseconds": 0.22317260009003803,
-      "images_per_second": 4480.836803427276,
+      "milliseconds": 0.22217064979486167,
+      "images_per_second": 4501.044584076864,
       "torch_peak_mb": 10.324992,
       "driver_delta_mb": 20.97152
     },
@@ -1190,10 +2143,10 @@
       "size": 512,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 17.878561099860235,
-      "images_per_second": 223.73165142642657,
+      "milliseconds": 17.833050299668685,
+      "images_per_second": 224.30262533798353,
       "torch_peak_mb": 174.72,
-      "driver_delta_mb": 201.326592
+      "driver_delta_mb": 203.423744
     },
     {
       "library": "torchtomo",
@@ -1201,10 +2154,10 @@
       "size": 512,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 54.48506005013769,
-      "images_per_second": 73.41462038069079,
-      "torch_peak_mb": 615.120896,
-      "driver_delta_mb": 603.979776
+      "milliseconds": 37.529003500822,
+      "images_per_second": 106.58423157738221,
+      "torch_peak_mb": 109.184,
+      "driver_delta_mb": 67.108864
     },
     {
       "library": "torchtomo",
@@ -1212,10 +2165,43 @@
       "size": 512,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 14.283604899901547,
-      "images_per_second": 280.0413500675569,
+      "milliseconds": 14.287140499800444,
+      "images_per_second": 279.97204899439953,
       "torch_peak_mb": 174.915584,
       "driver_delta_mb": 201.326592
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "forward",
+      "size": 512,
+      "angles": 360,
+      "batch": 4,
+      "milliseconds": 2.198648900957778,
+      "images_per_second": 1819.2991151327142,
+      "torch_peak_mb": 7.143424,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "backproject",
+      "size": 512,
+      "angles": 360,
+      "batch": 4,
+      "milliseconds": 1.9883757500792854,
+      "images_per_second": 2011.692206485873,
+      "torch_peak_mb": 7.143424,
+      "driver_delta_mb": 0.0
+    },
+    {
+      "library": "torchtomo-cuda",
+      "operation": "fbp",
+      "size": 512,
+      "angles": 360,
+      "batch": 4,
+      "milliseconds": 0.6251957995118573,
+      "images_per_second": 6397.995640922627,
+      "torch_peak_mb": 29.538304,
+      "driver_delta_mb": 20.97152
     },
     {
       "library": "leap",
@@ -1223,8 +2209,8 @@
       "size": 512,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 2.5989379497332266,
-      "images_per_second": 1539.0902273794527,
+      "milliseconds": 2.6242066494887695,
+      "images_per_second": 1524.2702021120376,
       "torch_peak_mb": 10.878976,
       "driver_delta_mb": 0.0
     },
@@ -1234,8 +2220,8 @@
       "size": 512,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 1.6610384998784866,
-      "images_per_second": 2408.1320211979555,
+      "milliseconds": 1.6280002004350536,
+      "images_per_second": 2457.0021545028508,
       "torch_peak_mb": 8.388608,
       "driver_delta_mb": 0.0
     },
@@ -1245,8 +2231,8 @@
       "size": 512,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 7.658707600057824,
-      "images_per_second": 522.2813311177724,
+      "milliseconds": 7.610443599696737,
+      "images_per_second": 525.5935409808955,
       "torch_peak_mb": 10.878976,
       "driver_delta_mb": 0.0
     },
@@ -1256,8 +2242,8 @@
       "size": 512,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 0.6739018001098884,
-      "images_per_second": 5935.582898499081,
+      "milliseconds": 0.6750299507984892,
+      "images_per_second": 5925.662995054401,
       "torch_peak_mb": 2.94912,
       "driver_delta_mb": 0.0
     },
@@ -1267,8 +2253,8 @@
       "size": 512,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 0.6304102000285638,
-      "images_per_second": 6345.075000085278,
+      "milliseconds": 0.6295128492638469,
+      "images_per_second": 6354.1197049077,
       "torch_peak_mb": 4.194304,
       "driver_delta_mb": 0.0
     },
@@ -1278,8 +2264,8 @@
       "size": 512,
       "angles": 360,
       "batch": 4,
-      "milliseconds": 0.8825328997772885,
-      "images_per_second": 4532.408934567107,
+      "milliseconds": 0.8801660500466824,
+      "images_per_second": 4544.597010743425,
       "torch_peak_mb": 43.658752,
       "driver_delta_mb": 37.748736
     }

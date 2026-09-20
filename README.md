@@ -12,8 +12,9 @@ TorchTomo provides forward projection, an exact discrete adjoint, analytical bac
 ## Features
 
 - Pure PyTorch implementation with no custom CUDA build step
-- Optional fast CUDA kernels (`backend="cuda"`), compiled at first use by the
-  NVRTC that ships with PyTorch, so installation stays `pip install torchtomo`
+- Optional fast CUDA kernels (`backend="cuda"`, or `"auto"` to take them wherever
+  they load), compiled at first use by the NVRTC that ships with PyTorch, so
+  installation stays `pip install torchtomo`
 - Autograd-friendly operators for learned reconstruction pipelines
 - Parallel-beam and fan-beam (flat detector) projectors
 - Built-in FBP filters: `ramp`, `shepp-logan`, `cosine`, `hamming`, `hann`, `none`
@@ -55,9 +56,13 @@ recon = projector.fbp(sinogram, filter_name="hann")
 ## Fast CUDA Kernels
 
 ```python
-projector = ParallelBeam(img_size=512, n_angles=360, backend="cuda").cuda()
+projector = ParallelBeam(img_size=512, n_angles=360, backend="auto").cuda()
 fan = FanBeam(img_size=512, n_angles=360, backend="cuda").cuda()
 ```
+
+`backend="auto"` takes the CUDA kernels wherever NVRTC loads and the PyTorch path
+everywhere else. It decides once, in the constructor, so `projector.backend`
+reports which one it became.
 
 `backend="cuda"` runs forward, adjoint, and FBP backprojection on CUDA kernels
 written in C++ and compiled the first time they are needed by NVRTC, the
@@ -132,6 +137,15 @@ torch.testing.assert_close((ax * y).sum(), (x * aty).sum())
 aty.square().mean().backward()  # gradients reach y and upstream dual networks
 ```
 
+**Migration (0.3):** `fbp()` reconstructions change. The ramp filter is now the
+DFT of Kak and Slaney's spatial kernel rather than a sampled `|f|`, which restores
+the DC bin that sampling zeroes. Reconstructions no longer sit a constant below
+the object (-0.017 to +0.00004 on Shepp-Logan at 512 px), and reprojecting one
+returns the measurements it came from (gain 0.906 to 1.000, relative residual
+0.100 to 0.005, level with LEAP). PSNR against the phantom rises 1.3 dB and SSIM
+0.23 at 512 px and 360 views. Numbers from FBP runs before 0.3 are not comparable
+with numbers after it.
+
 **Migration:** `backward(y)` now computes the exact discrete adjoint. The previous
 analytical backprojection is available as `backproject(y)` and is still used by
 `fbp()`. It includes angular normalization and, for fan-beam geometry, distance weights.
@@ -183,8 +197,8 @@ PYTHONPATH=src python benchmark/benchmark_adjoint.py --pairs 500 --dtype float64
 
 ## API Snapshot
 
-- `ParallelBeam(..., backend="torch" | "cuda" | "triton")`
-- `FanBeam(..., backend="torch" | "cuda")`
+- `ParallelBeam(..., backend="torch" | "cuda" | "triton" | "auto")`
+- `FanBeam(..., backend="torch" | "cuda" | "auto")`
 - `projector.forward(image)`
 - `projector.backward(sinogram)`: exact discrete adjoint, for LPD/iterative methods
 - `projector.adjoint(sinogram)`: equivalent to `backward(sinogram)`

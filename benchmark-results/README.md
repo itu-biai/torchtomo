@@ -26,80 +26,77 @@ could only match up to a fitted ratio, while LEAP confirms the absolute scale.
 
 ## Reconstruction quality, Shepp-Logan
 
-PSNR in dB and SSIM, over the visible circle.
+PSNR in dB and SSIM, over the visible circle. Measured with the Ram-Lak ramp that
+landed in 0.3; the row below the table is what the same runs gave before it.
 
-| Geometry | torchtomo | LEAP | torch-radon |
-| --- | --- | --- | --- |
-| 256 px, 90 angles | 24.27 / 0.539 | 25.57 / 0.618 | 24.63 / 0.608 |
-| 256 px, 180 angles | 26.20 / 0.657 | 27.32 / 0.822 | 26.77 / 0.810 |
-| 256 px, 360 angles | 26.74 / 0.718 | 27.88 / 0.923 | 27.39 / 0.915 |
-| 512 px, 90 angles | 23.14 / 0.474 | 24.17 / 0.512 | 23.41 / 0.514 |
-| 512 px, 180 angles | 27.13 / 0.592 | 28.36 / 0.716 | 27.85 / 0.719 |
-| 512 px, 360 angles | 28.78 / 0.682 | 30.31 / 0.886 | 29.87 / 0.884 |
+| Geometry | torchtomo | torchtomo-cuda | LEAP | torch-radon |
+| --- | --- | --- | --- | --- |
+| 256 px, 90 angles | 25.59 / 0.648 | 25.59 / 0.648 | 25.55 / 0.618 | 25.59 / 0.648 |
+| 256 px, 180 angles | 27.07 / 0.850 | 27.07 / 0.850 | 27.33 / 0.819 | 27.07 / 0.850 |
+| 256 px, 360 angles | 27.46 / 0.937 | 27.46 / 0.937 | 27.89 / 0.923 | 27.46 / 0.937 |
+| 512 px, 90 angles | 24.48 / 0.534 | 24.48 / 0.534 | 24.20 / 0.511 | 24.48 / 0.534 |
+| 512 px, 180 angles | 28.48 / 0.745 | 28.48 / 0.745 | 28.39 / 0.714 | 28.48 / 0.745 |
+| 512 px, 360 angles | 30.08 / 0.909 | 30.08 / 0.909 | 30.35 / 0.886 | 30.08 / 0.909 |
 
-torchtomo is last everywhere, and its SSIM lags much further than its PSNR. Two
-separate causes account for that, both in its FBP rather than in its projector.
+torchtomo and torch-radon now agree to two decimals in both metrics, which is what
+two libraries applying the same discrete ramp to the same measurements should do.
+Against LEAP it leads on SSIM in every row and on PSNR at 90 views, and trails by
+0.26 to 0.43 dB at 180 and 360 views. The `cuda` backend reproduces the PyTorch
+path to the same two decimals; its own kernels are the only difference.
 
-## torchtomo's FBP carries a DC offset
+Before the ramp fix the same table read 24.27 / 0.539 at 256 px and 90 views up to
+28.78 / 0.682 at 512 px and 360 views, last in every row and by 0.2 of SSIM at the
+bottom of it. Both causes were in the FBP filter rather than in the projector, and
+both were the same one bin.
 
-Its reconstruction sits a constant -0.0172 below the phantom, where LEAP's and
-torch-radon's biases are zero to five decimal places. The error maps in
-`library-comparison.png` show it plainly: torchtomo's interior is uniformly blue,
-the other two are white.
+## The DC bin was the whole story
 
-The cause is in `src/torchtomo/filters.py`. The ramp is built analytically as
-`freq.abs()`, so the DC bin is exactly zero and the mean of every projection is
-discarded. torch-radon and skimage instead build the Kak and Slaney kernel
-(Chapter 3, Equation 61) in the spatial domain and transform it, which leaves a
-small nonzero DC term. Normalised by their maxima the two filters agree bin for
-bin to within 1% and differ only there, 0.000396 against 0.
+The ramp was built analytically as `freq.abs()`, so the DC bin of the padded
+transform was exactly zero and the mean of every projection was discarded. The
+reconstruction then sat a constant -0.0172 below the phantom, where LEAP's and
+torch-radon's biases were zero to five decimal places: the error maps in the
+`library-comparison.png` of that time show torchtomo's interior uniformly blue and
+the other two white.
 
-Setting that one bin recovers almost all of the gap:
+torch-radon and skimage instead build Kak and Slaney's kernel (Chapter 3,
+Equation 61) in the spatial domain and transform it, which leaves a small positive
+DC term, 2 / (pi^2 M) for a transform of length M. Normalised by their maxima the
+two filters agree bin for bin to within 3% and differ most at that one bin,
+0.000396 against 0.
 
-| Geometry | current | DC bin corrected | torch-radon |
-| --- | --- | --- | --- |
-| 512 px, 90 angles | 23.14 / 0.474 | 23.41 / 0.514 | 23.41 / 0.514 |
-| 512 px, 360 angles | 28.78 / 0.682 | 29.85 / 0.877 | 29.87 / 0.884 |
-| 256 px, 180 angles | 26.20 / 0.657 | 26.76 / 0.809 | 26.77 / 0.810 |
+`src/torchtomo/filters.py` now builds the ramp the second way, for every window on
+top of it. The reconstruction bias at 512 px and 360 views is +0.00004, and the
+quality table above is the rest of the effect.
 
-A residual bias of +0.0024 remains against torch-radon's 0.00000, so the exact
-value is worth deriving rather than lifting, but one bin is the whole story.
+## FBP inverts its own forward projector
 
-**This has not been applied.** The benchmark runs in `examples/ellipses` were
-produced with the current filter, and changing it would make those tables
-incomparable with each other.
+Reprojecting a reconstruction should return the measurements it came from. That
+test used to fail in a way a constant could not fix: torchtomo plateaued at a 10%
+residual whatever the angle count, two thirds of it a fixed 9.4% amplitude deficit,
+while LEAP converged to 0.45%. Dividing by the fitted gain halved the residual and
+cost PSNR, which said the deficit was not a scale.
 
-One caveat on how far this carries. On the noisy real CT slices the correction
-helps the circle metric by +0.22 dB but costs 0.18 dB in the display window, so
-it is a clear win on noiseless and phantom data and roughly neutral once Poisson
-noise dominates.
+It was the missing DC bin, which carries about a third of a sinogram's energy. With
+the ramp built from the spatial kernel, gain and residual land on LEAP's, from
+`benchmark/fbp_consistency.py`, 512 px, Shepp-Logan, gain / residual / bias:
 
-## torchtomo's FBP is not a consistent inverse of its own forward
+| Angles | torchtomo | LEAP |
+| ---: | ---: | ---: |
+| 45 | 1.0018 / 0.0611 / +0.00001 | 1.0018 / 0.0638 / +0.00001 |
+| 90 | 1.0000 / 0.0173 / +0.00001 | 1.0001 / 0.0187 / +0.00000 |
+| 180 | 1.0002 / 0.0054 / +0.00007 | 0.9998 / 0.0056 / -0.00000 |
+| 360 | 0.9999 / 0.0049 / +0.00004 | 0.9997 / 0.0045 / -0.00000 |
+| 720 | 0.9998 / 0.0051 / +0.00002 | 0.9997 / 0.0048 / +0.00000 |
 
-A sharper problem than the DC bin, and a separate one. Re-projecting a
-reconstruction should return the measurements it came from:
+Residual is `||A fbp(y) - y|| / ||y||` and gain is the least squares scale between
+the two. torchtomo is ahead at 45 and 90 views and level from 180 on. This is what
+any method whose loss round-trips through `fbp()` and `forward()` was paying for:
+BM3D, RED, Noise2Inverse and Proj2Proj in `examples/ellipses`.
 
-| Angles | torchtomo gain | torchtomo residual | LEAP gain | LEAP residual |
-| ---: | ---: | ---: | ---: | ---: |
-| 45 | 0.9135 | 0.1441 | 1.0021 | 0.0721 |
-| 90 | 0.9076 | 0.1048 | 1.0001 | 0.0203 |
-| 180 | 0.9064 | 0.1002 | 0.9998 | 0.0058 |
-| 360 | 0.9061 | 0.0998 | 0.9998 | 0.0045 |
-| 720 | 0.9058 | 0.0998 | 0.9997 | 0.0048 |
+Fan beam had the same defect and less of it, because a detector 1.5x wider than the
+image leaves less of the projection mean in the DC bin: gain 0.9753 -> 0.9991,
+residual 0.0263 -> 0.0049, bias -0.00446 -> -0.00010 at 512 px and 360 views.
 
-Residual is `||A fbp(y) - y|| / ||y||`, gain is the least squares scale between
-the two. LEAP converges to a 0.45% residual. torchtomo plateaus at 10% and stops
-improving with more angles, because roughly two thirds of it is a fixed 9.4%
-amplitude deficit that does not depend on the angle count.
-
-Dividing the reconstruction by that gain halves the residual, to 0.037 at 360
-angles, but does not reach LEAP and costs 0.2 dB of PSNR against the phantom. So
-a single constant is not the whole fix: the current scale is close to the best one
-for PSNR, while being the wrong one for self-consistency. The two goals are
-genuinely in tension here, and the remainder is spectral rather than a scale.
-
-This matters for any method whose loss round-trips through `fbp()` and
-`forward()`. The next section is what that costs.
 
 ## Speed
 
