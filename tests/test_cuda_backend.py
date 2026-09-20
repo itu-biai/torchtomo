@@ -164,8 +164,10 @@ def test_falls_back_on_cpu_and_float64():
         torch.testing.assert_close(fast64.adjoint(fast64.forward(x64)), eager64.adjoint(eager64.forward(x64)))
 
 
-def test_fan_cuda_backend_does_not_build_pytorch_grids():
-    fast = FanBeam(img_size=64, n_angles=30, backend="cuda")
+@pytest.mark.parametrize("backend", ["torch", "cuda", "auto"])
+def test_fan_geometry_is_built_on_first_use(backend):
+    """No backend pays for the PyTorch path's grids until something reads them."""
+    fast = FanBeam(img_size=64, n_angles=30, backend=backend)
     assert fast._buffers["ray_grids"] is None and fast._buffers["backward_grids"] is None
     assert "ray_grids" not in fast.state_dict()
     # Reading one builds them, so code that inspects the geometry keeps working.
@@ -181,6 +183,24 @@ def test_backend_is_validated():
     with pytest.raises(ValueError):
         ParallelBeam(img_size=8, n_angles=4, triton=True, backend="cuda")
     assert ParallelBeam(img_size=8, n_angles=4, triton=True).backend == "triton"
+
+
+@pytest.mark.parametrize("cls", [ParallelBeam, FanBeam])
+def test_auto_backend_follows_the_runtime(cls):
+    projector = cls(img_size=8, n_angles=4, backend="auto")
+    expected = "cuda" if runtime_available() else "torch"
+    assert projector.backend == expected
+    # It resolves to a real backend, so nothing downstream has to know about "auto".
+    assert projector.backend in ("cuda", "torch")
+
+
+@pytest.mark.parametrize("cls", [ParallelBeam, FanBeam])
+def test_auto_backend_runs_the_same_geometry(cls):
+    _require_kernels()
+    auto = cls(img_size=32, n_angles=12, backend="auto").cuda()
+    assert auto.backend == "cuda"
+    x = torch.rand(1, 1, 32, 32, device="cuda")
+    torch.testing.assert_close(auto.forward(x), cls(img_size=32, n_angles=12, backend="cuda").cuda().forward(x))
 
 
 def test_compile_errors_carry_the_nvrtc_log():
@@ -244,3 +264,5 @@ def test_approximate_mode_is_validated():
         FanBeam(img_size=8, n_angles=4, approximate=True)
     with pytest.raises(ValueError):
         FanBeam(img_size=8, n_angles=4, backend="cuda", approximate=True, n_samples=1)
+    # "auto" may land on the PyTorch path, which ignores it rather than refusing it.
+    assert ParallelBeam(img_size=8, n_angles=4, backend="auto", approximate=True).approximate

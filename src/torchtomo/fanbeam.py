@@ -73,12 +73,14 @@ class FanBeam(BaseProjector):
             backend: "torch" (default) runs everywhere on PyTorch operations.
                 "cuda" runs float32 CUDA tensors on kernels compiled at first use
                 by the NVRTC that ships with PyTorch; the forward and adjoint are
-                an exact matched pair of their own. It keeps only per-ray tables
-                on the device and builds the PyTorch path's grids (about 2.2 GB
-                at 512 px, 360 angles) only if that path is ever used, e.g. on
-                the CPU or in float64.
-            approximate: With backend="cuda", sample the image through the GPU's
-                texture units (hardware bilinear interpolation with 8-bit weights,
+                an exact matched pair of their own, and it keeps only per-ray
+                tables on the device. "auto" is "cuda" where NVRTC loads and
+                "torch" everywhere else, decided once here: `projector.backend`
+                reports which it became. Either way the PyTorch path's sampling
+                grids (about 2.2 GB at 512 px, 360 angles) are built only if that
+                path is used, e.g. on the CPU or in float64.
+            approximate: With backend="cuda" or "auto", sample the image through
+                the GPU's texture units (hardware bilinear interpolation with 8-bit weights,
                 about 3e-4 relative error) and use a pixel-driven adjoint (linear
                 interpolation on the detector with the fan's ray-spacing weight).
                 Faster, but the forward and adjoint are no longer each other's
@@ -89,9 +91,9 @@ class FanBeam(BaseProjector):
         n_det = int(round(1.5 * img_size) if n_det is None else n_det)
         n_samples = int(img_size if n_samples is None else n_samples)
         super().__init__(img_size, n_angles, n_det, angle_range, angles=angles)
-        self.backend = _check_backend(backend, ("torch", "cuda"))
-        if approximate and self.backend != "cuda":
-            raise ValueError("approximate=True needs backend='cuda'")
+        self.backend = _check_backend(backend, ("auto", "torch", "cuda"))
+        if approximate and backend not in ("cuda", "auto"):
+            raise ValueError("approximate=True needs backend='cuda' or 'auto'")
         if approximate and n_samples < 2:
             raise ValueError("approximate=True needs at least two samples per ray")
         self.approximate = approximate
@@ -122,11 +124,12 @@ class FanBeam(BaseProjector):
     def _set_geometry_buffers(self) -> None:
         """Rebuild ray and backprojection grids in the current angles dtype."""
         dtype, device = self.angles.dtype, self.angles.device
-        if self.backend == "cuda":
-            for name in _EAGER_GEOMETRY:
-                self._set_buffer(name, None)
-        else:
-            self._build_eager_geometry()
+        # The PyTorch path's four grids are the expensive part of this geometry and
+        # a subclass that replaces every operator, or a run that stays on the CUDA
+        # kernels, never touches them. They start empty and __getattr__ builds them
+        # on first read.
+        for name in _EAGER_GEOMETRY:
+            self._set_buffer(name, None)
 
         det_pos = torch.linspace(
             -self._det_width_norm / 2, self._det_width_norm / 2, self.n_det, dtype=dtype, device=device
@@ -160,8 +163,8 @@ class FanBeam(BaseProjector):
             self.register_buffer(name, value)
 
     def __getattr__(self, name: str):
-        # With backend='cuda' the PyTorch path's grids start as None and are built on
-        # first access, so falling back (CPU, float64) or reading them still works.
+        # The PyTorch path's grids start as None and are built on first access, so
+        # falling back (CPU, float64) or reading them still works.
         if name in _EAGER_GEOMETRY:
             buffers = self.__dict__.get("_buffers", {})
             if name in buffers and buffers[name] is None:

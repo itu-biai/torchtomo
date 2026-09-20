@@ -618,9 +618,10 @@ def main():
     )
     parser.add_argument(
         "--backend",
-        choices=("torch", "cuda"),
+        choices=("torch", "cuda", "auto"),
         default="torch",
-        help="torchtomo kernels: torch runs anywhere; cuda compiles CUDA kernels at first use with PyTorch's NVRTC",
+        help="torchtomo kernels: torch runs anywhere, cuda compiles kernels at first use "
+        "with PyTorch's NVRTC, auto takes cuda wherever NVRTC loads",
     )
     parser.add_argument(
         "--geometry",

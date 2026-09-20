@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 
 from ._cuda_kernels import cuda_kernels_available
+from ._nvrtc import runtime_available
 from ._sampling import grid_sample_input_backward_supported
 
 
@@ -96,8 +97,16 @@ class _KernelBackproject(torch.autograd.Function):
 
 
 def _check_backend(backend: str, choices: tuple[str, ...]) -> str:
+    """Validate a backend name and settle "auto" on what this machine has.
+
+    "auto" answers one question, whether NVRTC and the CUDA driver load here, and
+    it answers it once: a projector reports the backend it will actually use, and
+    a CPU or float64 tensor still falls back from "cuda" call by call.
+    """
     if backend not in choices:
         raise ValueError(f"backend must be one of {choices}, got {backend!r}")
+    if backend == "auto":
+        return "cuda" if runtime_available() else "torch"
     return backend
 
 

@@ -134,8 +134,10 @@ class ParallelBeam(BaseProjector):
                 install; the forward and adjoint are an exact matched pair of
                 their own. "triton" uses the optional Triton kernels. Both fall
                 back to "torch" on CPU, MPS, float64, or when unavailable.
-            approximate: With backend="cuda", sample the image through the GPU's
-                texture units (hardware bilinear interpolation with 8-bit weights,
+                "auto" is "cuda" where NVRTC loads and "torch" everywhere else,
+                decided once here: `projector.backend` reports which it became.
+            approximate: With backend="cuda" or "auto", sample the image through
+                the GPU's texture units (hardware bilinear interpolation with 8-bit weights,
                 about 3e-4 relative error) and use a pixel-driven adjoint (linear
                 interpolation on the detector). Faster, but the forward and adjoint
                 are no longer each other's exact transpose. Off by default.
@@ -157,9 +159,9 @@ class ParallelBeam(BaseProjector):
             if backend not in ("torch", "triton"):
                 raise ValueError(f"triton=True conflicts with backend={backend!r}")
             backend = "triton"
-        self.backend = _check_backend(backend, ("torch", "triton", "cuda"))
-        if approximate and self.backend != "cuda":
-            raise ValueError("approximate=True needs backend='cuda'")
+        self.backend = _check_backend(backend, ("auto", "torch", "triton", "cuda"))
+        if approximate and backend not in ("cuda", "auto"):
+            raise ValueError("approximate=True needs backend='cuda' or 'auto'")
         self.approximate = approximate
         self._sparse_adjoint_matrix = None
         self._grid_cache: dict = {}
