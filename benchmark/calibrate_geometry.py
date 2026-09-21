@@ -27,9 +27,9 @@ import torch
 from torchtomo import FanBeam, ParallelBeam, shepp_logan
 
 
-def _build(name: str, size: int, n_angles: int, device: torch.device):
+def _build(name: str, size: int, n_angles: int, device: torch.device, backend: str = "torch"):
     kind = ParallelBeam if name == "parallel" else FanBeam
-    return kind(img_size=size, n_angles=n_angles, circle=True).to(device)
+    return kind(img_size=size, n_angles=n_angles, circle=True, backend=backend).to(device)
 
 
 def _pose_with_shift(base: torch.Tensor, shift: torch.Tensor) -> torch.Tensor:
@@ -44,7 +44,7 @@ def measure(sinogram, projector, base, shift):
     return (projector.forward(projector.fbp(sinogram)) - sinogram).pow(2).mean()
 
 
-def calibrate(name, size, n_angles, truth_shift, steps, lr, noise, seed, device):
+def calibrate(name, size, n_angles, truth_shift, steps, lr, noise, seed, device, backend):
     torch.manual_seed(seed)
     phantom = shepp_logan(size).view(1, 1, size, size).to(device)
 
@@ -55,7 +55,7 @@ def calibrate(name, size, n_angles, truth_shift, steps, lr, noise, seed, device)
         if noise > 0:
             sinogram = sinogram + noise * sinogram.std() * torch.randn_like(sinogram)
 
-    projector = _build(name, size, n_angles, device)
+    projector = _build(name, size, n_angles, device, backend)
     base = projector.pose.detach().clone()
     shift = torch.zeros((), dtype=base.dtype, requires_grad=True)
     optimizer = torch.optim.Adam([shift], lr=lr)
@@ -86,15 +86,21 @@ def main():
     parser.add_argument("--noise", type=float, default=0.0, help="Gaussian noise, relative to the sinogram's own std")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--backend", default="auto", choices=("auto", "torch", "cuda"), help="for the projector being calibrated"
+    )
     args = parser.parse_args()
     device = torch.device(args.device)
 
     names = ("parallel", "fan") if args.geometry == "both" else (args.geometry,)
     for name in names:
-        print(f"\n{name} beam, {args.size} px, {args.angles} angles, axis off by {args.shift:.2f} px on {device}")
+        print(
+            f"\n{name} beam, {args.size} px, {args.angles} angles, axis off by {args.shift:.2f} px, "
+            f"on {device}, backend {args.backend}"
+        )
         start = time.perf_counter()
         history = calibrate(
-            name, args.size, args.angles, args.shift, args.steps, args.lr, args.noise, args.seed, device
+            name, args.size, args.angles, args.shift, args.steps, args.lr, args.noise, args.seed, device, args.backend
         )
         elapsed = time.perf_counter() - start
         print(f"{'step':>5}  {'loss':>12}  {'shift px':>9}  {'error px':>9}")

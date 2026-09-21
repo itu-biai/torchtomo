@@ -8,7 +8,7 @@ import torch
 from . import _cuda_kernels
 from ._sampling import grid_sample_input_backward, sample_bilinear
 from ._triton_kernels import triton_adjoint, triton_backproject, triton_forward, triton_kernels_available
-from .base import BaseProjector, _check_backend, _KernelBackproject, _KernelProject
+from .base import BaseProjector, _check_backend, _KernelBackproject, _KernelGeometryProject, _KernelProject
 from .filters import FilterType, apply_filter
 
 
@@ -147,9 +147,9 @@ class ParallelBeam(BaseProjector):
                 optimiser reaches it through .parameters(). Off by default, where
                 the pose is an ordinary buffer and `pose.requires_grad_(True)` still
                 gives a one-off gradient. Either way the operators only differentiate
-                the geometry when it asks for a gradient, and such a call runs on
-                the PyTorch path; a shifted pose that does not stays on the CUDA
-                kernels.
+                the geometry when it asks for a gradient. With backend="cuda",
+                forward() and adjoint() do so on the kernels, to first order;
+                everything else, and every order, on the PyTorch path.
         """
         n_det = n_det or img_size
         super().__init__(img_size, n_angles, n_det, angle_range, angles=angles, learnable_geometry=learnable_geometry)
@@ -191,15 +191,28 @@ class ParallelBeam(BaseProjector):
             self.backend == "triton" and self._pose_is_plain() and triton_kernels_available(tensor.device, tensor.dtype)
         )
 
-    def _kernel_forward(self, x: torch.Tensor) -> torch.Tensor:
-        pose, mask = self._kernel_pose(x.device), self._kernel_mask(x.device)
+    def _kernel_tables(self, device: torch.device, differentiable: bool = False) -> tuple[torch.Tensor, ...]:
+        """What the kernels read: the view table, in the graph when `differentiable`."""
+        if differentiable:
+            return (self._view_table(self.pose.to(device=device, dtype=torch.float64), 4),)
+        return (self._kernel_pose(device),)
+
+    def _kernel_table_grads(self, image: torch.Tensor, grad: torch.Tensor, tables) -> tuple[torch.Tensor, ...]:
+        (pose,) = tables
+        mask = self._kernel_mask(image.device)
+        return (_cuda_kernels.parallel_pose_grad(image, grad, pose, mask, self.pixel_size),)
+
+    def _kernel_forward(self, x: torch.Tensor, tables=None) -> torch.Tensor:
+        (pose,) = tables or self._kernel_tables(x.device)
+        mask = self._kernel_mask(x.device)
         if self.approximate:
             return _cuda_kernels.parallel_forward_texture(x, pose, mask, self.pixel_size, self._kernel_cache)
         return _cuda_kernels.parallel_forward(x, pose, mask, self.pixel_size)
 
-    def _kernel_adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
+    def _kernel_adjoint(self, sinogram: torch.Tensor, tables=None) -> torch.Tensor:
         device = sinogram.device
-        pose, mask = self._kernel_pose(device), self._kernel_mask(device)
+        (pose,) = tables or self._kernel_tables(device)
+        mask = self._kernel_mask(device)
         if self.approximate:
             # Summed along a ray, a pixel's bilinear tent is close to a linear tent
             # across the detector: the adjoint becomes a pixel-driven backprojection.
@@ -445,6 +458,8 @@ class ParallelBeam(BaseProjector):
         B = x.shape[0]
         if self._use_kernels(x):
             return _KernelProject.apply(x, self)
+        if self._use_geometry_kernels(x):
+            return _KernelGeometryProject.apply(x, self, *self._kernel_tables(x.device, differentiable=True))
         if self._use_triton(x):
             return _TritonProject.apply(x, self)
 

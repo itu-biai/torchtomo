@@ -279,6 +279,62 @@ def fan_backproject(
     return out
 
 
+def parallel_pose_grad(
+    image: torch.Tensor, grad_sinogram: torch.Tensor, pose: torch.Tensor, mask: torch.Tensor | None, pixel_size: float
+) -> torch.Tensor:
+    """d<g, A x> / d(view table), [A, 4] for the shifted table (cos, sin, s, 0).
+
+    The last column stays zero. Summed over the batch.
+    """
+    batch, size = image.shape[0], image.shape[-1]
+    n_angles = pose.shape[0]
+    flat = image.reshape(batch, size * size)
+    grad_flat = grad_sinogram.reshape(batch, n_angles * size)
+    mask = _flat_mask(mask)
+    out = torch.zeros(n_angles, 4, device=image.device, dtype=torch.float32)
+    c = 0.5 * (size - 1)
+    r2 = (c + 2.0) ** 2 if mask is not None else 1e30
+    bins = _FORWARD_TILE * _FORWARD_WARPS
+    grid = (math.ceil(size / bins), n_angles, 1)
+    block = (32 * _FORWARD_WARPS, 1, 1)
+    library = _kernels()
+    for start, count, width in _groups(batch, _FORWARD_GROUP):
+        packed = _pack(flat, start, count, width, mask)
+        packed_grad = _pack(grad_flat, start, count, width)
+        kernel = library.function(f"parallel_pose_grad_c{width}", image.device)
+        kernel(grid, block, [packed, packed_grad, pose, out, size, pixel_size, r2])
+    return out
+
+
+def fan_ray_grad(
+    image: torch.Tensor,
+    grad_sinogram: torch.Tensor,
+    rays: torch.Tensor,
+    weights: torch.Tensor,
+    mask: torch.Tensor | None,
+    n_angles: int,
+    n_det: int,
+    n_samples: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """d<g, A x> / d(ray table) and / d(ray weights), [A * n_det, 4] and [A * n_det]."""
+    batch, size = image.shape[0], image.shape[-1]
+    flat = image.reshape(batch, size * size)
+    grad_flat = grad_sinogram.reshape(batch, n_angles * n_det)
+    mask = _flat_mask(mask)
+    out_rays = torch.zeros(n_angles * n_det, 4, device=image.device, dtype=torch.float32)
+    out_weights = torch.zeros(n_angles * n_det, device=image.device, dtype=torch.float32)
+    bins = _FORWARD_TILE * _FORWARD_WARPS
+    grid = (math.ceil(n_det / bins), n_angles, 1)
+    block = (32 * _FORWARD_WARPS, 1, 1)
+    library = _kernels()
+    for start, count, width in _groups(batch, _FORWARD_GROUP):
+        packed = _pack(flat, start, count, width, mask)
+        packed_grad = _pack(grad_flat, start, count, width)
+        kernel = library.function(f"fan_ray_grad_c{width}", image.device)
+        kernel(grid, block, [packed, packed_grad, rays, weights, out_rays, out_weights, size, n_det, n_samples])
+    return out_rays, out_weights
+
+
 # ---------------------------------------------------------------------------------
 # Approximate mode: texture-sampled forwards and pixel-driven adjoints.
 # ---------------------------------------------------------------------------------

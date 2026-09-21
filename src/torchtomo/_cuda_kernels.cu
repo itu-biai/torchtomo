@@ -655,6 +655,207 @@ TT_FAN(4)
 TT_FAN(8)
 
 // ---------------------------------------------------------------------------------
+// Geometry gradients, launched only for a pose that wants a gradient. Each returns
+// the gradient of <g, A x> with respect to the table the forward read, and autograd
+// carries it from the table to the pose. That is the forward's own samples, each
+// weighted by its bin's upstream gradient and by the image's slope at the sample.
+// Since <g, A x> = <A^T g, x>, the adjoint's geometry gradient is the same launch
+// with the image and the sinogram swapped by the caller.
+// ---------------------------------------------------------------------------------
+
+// Bilinear value and its slope in the sample position, with the forward's zero
+// padding: each tent weight has slope -1 or +1 wherever its corner is in the image.
+template <int C>
+__device__ __forceinline__ void bilinear_slope(const float* __restrict__ img, int S, float px, float py,
+                                               float (&value)[C], float (&gx)[C], float (&gy)[C])
+{
+    const float xf = floorf(px), yf = floorf(py);
+    const int x0 = (int)xf, y0 = (int)yf;
+    const float dx = px - xf, dy = py - yf;
+    const bool in_x0 = x0 >= 0 && x0 < S, in_x1 = x0 + 1 >= 0 && x0 + 1 < S;
+    const bool in_y0 = y0 >= 0 && y0 < S, in_y1 = y0 + 1 >= 0 && y0 + 1 < S;
+#pragma unroll
+    for (int k = 0; k < C; ++k) value[k] = gx[k] = gy[k] = 0.f;
+    if (!(in_x0 || in_x1) || !(in_y0 || in_y1)) return;
+    const int cx0 = min(max(x0, 0), S - 1), cx1 = min(max(x0 + 1, 0), S - 1);
+    const int cy0 = min(max(y0, 0), S - 1), cy1 = min(max(y0 + 1, 0), S - 1);
+    float p00[C], p10[C], p01[C], p11[C];
+    fetch<C>(img, cy0 * S + cx0, p00);
+    fetch<C>(img, cy0 * S + cx1, p10);
+    fetch<C>(img, cy1 * S + cx0, p01);
+    fetch<C>(img, cy1 * S + cx1, p11);
+    const float wx0 = in_x0 ? 1.f - dx : 0.f, wx1 = in_x1 ? dx : 0.f;
+    const float wy0 = in_y0 ? 1.f - dy : 0.f, wy1 = in_y1 ? dy : 0.f;
+    const float sx0 = in_x0 ? -1.f : 0.f, sx1 = in_x1 ? 1.f : 0.f;
+    const float sy0 = in_y0 ? -1.f : 0.f, sy1 = in_y1 ? 1.f : 0.f;
+#pragma unroll
+    for (int k = 0; k < C; ++k) {
+        const float row0 = wx0 * p00[k] + wx1 * p10[k], row1 = wx0 * p01[k] + wx1 * p11[k];
+        value[k] = wy0 * row0 + wy1 * row1;
+        gx[k] = sx0 * (wy0 * p00[k] + wy1 * p01[k]) + sx1 * (wy0 * p10[k] + wy1 * p11[k]);
+        gy[k] = sy0 * row0 + sy1 * row1;
+    }
+}
+
+// Parallel beam, shifted table (cos, sin, s, 0), out [A, 4] accumulated with atomics.
+// With px = cx + cos u + sin v, py = cy + cos v - sin u, cx = c + cos s, cy = c - sin s
+// and (ex, ey) a sample's slope weighted by g, per view:
+//   d/dcos = sum ex u + ey v + s ex,   d/dsin = sum ex v - ey u - s ey,
+//   d/ds = cos sum ex - sin sum ey.
+template <int C, int TW>
+__device__ void parallel_pose_grad(const float* __restrict__ img, const float* __restrict__ grad,
+                                   const float4* __restrict__ pose, float* __restrict__ out, int S, float scale,
+                                   float r2)
+{
+    constexpr int TH = 32 / TW;
+    const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+    const int lw = lane % TW, lh = lane / TW;
+    const int a = blockIdx.y;
+    const int w_first = (blockIdx.x * (blockDim.x >> 5) + warp) * TW;
+    if (w_first >= S) return;
+    const int w = w_first + lw;
+    const float c = 0.5f * (float)(S - 1);
+    const float4 t = pose[a];
+    const float cs = t.x, sn = t.y;
+    float cx, cy;
+    parallel_centre<true>(t, c, cx, cy);
+    const float u = (float)w - c;
+    const float u_lo = (float)w_first - c + t.z, u_hi = (float)min(w_first + TW - 1, S - 1) - c + t.z;
+    const float u_min = (u_lo <= 0.f && u_hi >= 0.f) ? 0.f : fminf(fabsf(u_lo), fabsf(u_hi));
+    int h0 = 0, h1 = S - 1;
+    const float room = r2 - u_min * u_min;
+    if (room < 0.f) {
+        h1 = -1;
+    } else if (room < c * c * 4.f) {
+        const float e = sqrtf(room);
+        h0 = max(0, (int)floorf(c - e));
+        h1 = min(S - 1, (int)ceilf(c + e));
+    }
+    float g[C];
+#pragma unroll
+    for (int k = 0; k < C; ++k) g[k] = 0.f;
+    if (w < S) fetch<C>(grad + (size_t)a * S * C, w, g);
+    float su = 0.f, sv = 0.f, sx = 0.f, sy = 0.f;
+    if (w < S) {
+        for (int h = h0 + lh; h <= h1; h += TH) {
+            const float v = (float)h - c;
+            float px, py;
+            parallel_point(cs, sn, cx, cy, u, v, px, py);
+            float value[C], gx[C], gy[C];
+            bilinear_slope<C>(img, S, px, py, value, gx, gy);
+            float ex = 0.f, ey = 0.f;
+#pragma unroll
+            for (int k = 0; k < C; ++k) {
+                ex = __fmaf_rn(g[k], gx[k], ex);
+                ey = __fmaf_rn(g[k], gy[k], ey);
+            }
+            su += ex * u + ey * v;
+            sv += ex * v - ey * u;
+            sx += ex;
+            sy += ey;
+        }
+    }
+#pragma unroll
+    for (int offset = 1; offset < 32; offset <<= 1) {
+        su += __shfl_xor_sync(0xffffffffu, su, offset);
+        sv += __shfl_xor_sync(0xffffffffu, sv, offset);
+        sx += __shfl_xor_sync(0xffffffffu, sx, offset);
+        sy += __shfl_xor_sync(0xffffffffu, sy, offset);
+    }
+    if (lane == 0) {
+        float* o = out + (size_t)4 * a;
+        atomicAdd(o + 0, scale * (su + t.z * sx));
+        atomicAdd(o + 1, scale * (sv - t.z * sy));
+        atomicAdd(o + 2, scale * (cs * sx - sn * sy));
+    }
+}
+
+// Fan beam, ray (x0, y0, sx, sy) and weight: sample k at (x0 + k sx, y0 + k sy),
+// times the weight. Per ray
+//   d/dx0 = weight sum ex,   d/dy0 = weight sum ey,
+//   d/dsx = weight sum k ex, d/dsy = weight sum k ey,   d/dweight = sum g x(sample).
+// Each ray has one writer per launch, which adds to what earlier launches left.
+template <int C, int TW>
+__device__ void fan_ray_grad(const float* __restrict__ img, const float* __restrict__ grad,
+                             const float4* __restrict__ rays, const float* __restrict__ ray_weight,
+                             float4* __restrict__ out_rays, float* __restrict__ out_weight, int S, int n_det,
+                             int n_samples)
+{
+    constexpr int TH = 32 / TW;
+    const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+    const int lw = lane % TW, lh = lane / TW;
+    const int a = blockIdx.y;
+    const int d_first = (blockIdx.x * (blockDim.x >> 5) + warp) * TW;
+    if (d_first >= n_det) return;
+    const int d = d_first + lw;
+    const size_t r = (size_t)a * n_det + d;
+    float weight = 0.f;
+    float ax = 0.f, ay = 0.f, akx = 0.f, aky = 0.f, av = 0.f;
+    if (d < n_det) {
+        weight = ray_weight[r];
+        if (weight != 0.f) {
+            float g[C];
+            fetch<C>(grad, (int)r, g);
+            const float4 ray = rays[r];
+            for (int k = lh; k < n_samples; k += TH) {
+                float px, py;
+                fan_point(ray, (float)k, px, py);
+                float value[C], gx[C], gy[C];
+                bilinear_slope<C>(img, S, px, py, value, gx, gy);
+                float ex = 0.f, ey = 0.f, ev = 0.f;
+#pragma unroll
+                for (int q = 0; q < C; ++q) {
+                    ex = __fmaf_rn(g[q], gx[q], ex);
+                    ey = __fmaf_rn(g[q], gy[q], ey);
+                    ev = __fmaf_rn(g[q], value[q], ev);
+                }
+                const float kf = (float)k;
+                ax += ex;
+                ay += ey;
+                akx += kf * ex;
+                aky += kf * ey;
+                av += ev;
+            }
+        }
+    }
+#pragma unroll
+    for (int offset = TW; offset < 32; offset <<= 1) {
+        ax += __shfl_xor_sync(0xffffffffu, ax, offset);
+        ay += __shfl_xor_sync(0xffffffffu, ay, offset);
+        akx += __shfl_xor_sync(0xffffffffu, akx, offset);
+        aky += __shfl_xor_sync(0xffffffffu, aky, offset);
+        av += __shfl_xor_sync(0xffffffffu, av, offset);
+    }
+    if (lh == 0 && d < n_det && weight != 0.f) {
+        float4 o = out_rays[r];
+        o.x += weight * ax;
+        o.y += weight * ay;
+        o.z += weight * akx;
+        o.w += weight * aky;
+        out_rays[r] = o;
+        out_weight[r] += av;
+    }
+}
+
+#define TT_GEOMETRY_GRAD(C)                                                                                   \
+    extern "C" __global__ void __launch_bounds__(128) parallel_pose_grad_c##C(                                \
+        const float* img, const float* grad, const float4* pose, float* out, int S, float scale, float r2)    \
+    {                                                                                                         \
+        parallel_pose_grad<C, TT_FORWARD_TW>(img, grad, pose, out, S, scale, r2);                             \
+    }                                                                                                         \
+    extern "C" __global__ void __launch_bounds__(128) fan_ray_grad_c##C(                                      \
+        const float* img, const float* grad, const float4* rays, const float* ray_weight, float4* out_rays,   \
+        float* out_weight, int S, int n_det, int n_samples)                                                   \
+    {                                                                                                         \
+        fan_ray_grad<C, TT_FORWARD_TW>(img, grad, rays, ray_weight, out_rays, out_weight, S, n_det,           \
+                                       n_samples);                                                            \
+    }
+
+TT_GEOMETRY_GRAD(1)
+TT_GEOMETRY_GRAD(2)
+TT_GEOMETRY_GRAD(4)
+
+// ---------------------------------------------------------------------------------
 // Approximate mode (approximate=True). The forwards sample through the texture
 // units: hardware bilinear interpolation with 8-bit fractional weights, about 3e-4
 // relative error, one fetch for up to four images. The adjoints are pixel-driven:

@@ -7,7 +7,7 @@ import torch
 
 from . import _cuda_kernels
 from ._sampling import grid_sample_input_backward, sample_bilinear
-from .base import BaseProjector, _check_backend, _KernelBackproject, _KernelProject
+from .base import BaseProjector, _check_backend, _KernelBackproject, _KernelGeometryProject, _KernelProject
 from .filters import FilterType, apply_filter
 
 # Grids only the PyTorch path reads: about 2.2 GB at 512 px and 360 angles.
@@ -93,9 +93,9 @@ class FanBeam(BaseProjector):
                 per-view detector and source shift in pixels, as an nn.Parameter so
                 an optimiser reaches it through .parameters(). Off by default, where
                 the pose is an ordinary buffer and `pose.requires_grad_(True)` still
-                gives a one-off gradient. A call whose geometry wants a gradient
-                runs on the PyTorch path; a shifted pose that does not stays on
-                the CUDA kernels.
+                gives a one-off gradient. With backend="cuda", forward() and
+                adjoint() differentiate the geometry on the kernels, to first
+                order; everything else, and every order, on the PyTorch path.
         """
         src_dist = float(2 * img_size if src_dist is None else src_dist)
         det_dist = float(2 * img_size if det_dist is None else det_dist)
@@ -208,8 +208,27 @@ class FanBeam(BaseProjector):
         """Per-view lateral source offset in pixels, column 2 of the pose table."""
         return self.pose[:, 2]
 
-    def _kernel_forward(self, x: torch.Tensor) -> torch.Tensor:
-        rays, _, weights, _ = self._kernel_rays(x.device)
+    def _kernel_tables(self, device: torch.device, differentiable: bool = False) -> tuple[torch.Tensor, ...]:
+        """What the kernels read; rays and weights in the graph when `differentiable`.
+
+        The adjoint's candidate search reads inv_steps and views too, but only to
+        find the rays it then evaluates exactly, so they carry no gradient.
+        """
+        if differentiable:
+            rays, inv_steps, weights, views = self._ray_tables(self.pose.to(device=device, dtype=torch.float64))
+            return rays, inv_steps.detach(), weights, views.detach()
+        return self._kernel_rays(device)
+
+    def _kernel_table_grads(self, image: torch.Tensor, grad: torch.Tensor, tables) -> tuple:
+        rays, _, weights, _ = tables
+        mask = self._kernel_mask(image.device)
+        grad_rays, grad_weights = _cuda_kernels.fan_ray_grad(
+            image, grad, rays, weights, mask, self.n_angles, self.n_det, self.n_samples
+        )
+        return grad_rays, None, grad_weights, None
+
+    def _kernel_forward(self, x: torch.Tensor, tables=None) -> torch.Tensor:
+        rays, _, weights, _ = tables or self._kernel_tables(x.device)
         mask = self._kernel_mask(x.device)
         if self.approximate:
             return _cuda_kernels.fan_forward_texture(
@@ -217,8 +236,8 @@ class FanBeam(BaseProjector):
             )
         return _cuda_kernels.fan_forward(x, rays, weights, mask, self.n_angles, self.n_det, self.n_samples)
 
-    def _kernel_adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
-        rays, inv_steps, weights, views = self._kernel_rays(sinogram.device)
+    def _kernel_adjoint(self, sinogram: torch.Tensor, tables=None) -> torch.Tensor:
+        rays, inv_steps, weights, views = tables or self._kernel_tables(sinogram.device)
         alpha = (self._src_dist_norm + self._det_dist_norm) * (self.n_det - 1) / self._det_width_norm
         if self.approximate:
             centre = (self.img_size - 1) / 2
@@ -272,51 +291,54 @@ class FanBeam(BaseProjector):
         """
 
         def build(device):
-            f64 = torch.float64
-            pose = self.pose.detach().to(device=device, dtype=f64)
-            src_x, src_y, det_cx, det_cy, cos_a, sin_a = self._source_and_detector(pose, (-1, 1))
-            half = self._det_width_norm / 2
-            offsets = torch.linspace(-half, half, self.n_det, dtype=f64, device=device).view(1, -1)
-            dir_x = det_cx + offsets * cos_a - src_x
-            dir_y = det_cy + offsets * sin_a - src_y
-            length = torch.sqrt(dir_x**2 + dir_y**2)
-            dir_x, dir_y = dir_x / length, dir_y / length
-            b = 2 * (src_x * dir_x + src_y * dir_y)
-            c = src_x**2 + src_y**2 - 1.0
-            root = torch.sqrt(torch.clamp(b**2 - 4 * c, min=0))
-            t_entry = torch.clamp((-b - root) / 2, min=0)
-            t_exit = torch.maximum((-b + root) / 2, t_entry)
-            chord = t_exit - t_entry
-            centre = (self.img_size - 1) / 2
-            spacing = chord / (self.n_samples - 1) if self.n_samples > 1 else torch.zeros_like(chord)
-            rays = torch.stack(
-                (
-                    (src_x + t_entry * dir_x + 1) * centre,
-                    (src_y + t_entry * dir_y + 1) * centre,
-                    spacing * dir_x * centre,
-                    spacing * dir_y * centre,
-                ),
-                dim=-1,
-            )
-            steps = rays[..., 2:]
-            moving = steps.abs() > 1e-12
-            inv_steps = torch.where(moving, 1.0 / torch.where(moving, steps, torch.ones_like(steps)), 0.0)
-            weights = chord / self.n_samples
-            zeros = torch.zeros_like(cos_a)
-            pitch = self._det_width_norm / (self.n_det - 1)
-            lateral = (pose[:, 2:3] - pose[:, 1:2]) * self.shift_scale / pitch
-            views = torch.cat(
-                ((src_x + 1) * centre, (src_y + 1) * centre, cos_a, sin_a, sin_a, -cos_a, lateral, zeros), dim=-1
-            )
-            as32 = lambda t: t.to(torch.float32).contiguous()  # noqa: E731
-            return (
-                as32(rays.reshape(-1, 4)),
-                as32(inv_steps.reshape(-1, 2)),
-                as32(weights.reshape(-1)),
-                as32(views.reshape(-1, 4)),
-            )
+            return self._ray_tables(self.pose.detach().to(device=device, dtype=torch.float64))
 
         return self._kernel_cached("rays", device, build)
+
+    def _ray_tables(self, pose: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """_kernel_rays from a float64 pose, differentiable in it."""
+        f64, device = torch.float64, pose.device
+        src_x, src_y, det_cx, det_cy, cos_a, sin_a = self._source_and_detector(pose, (-1, 1))
+        half = self._det_width_norm / 2
+        offsets = torch.linspace(-half, half, self.n_det, dtype=f64, device=device).view(1, -1)
+        dir_x = det_cx + offsets * cos_a - src_x
+        dir_y = det_cy + offsets * sin_a - src_y
+        length = torch.sqrt(dir_x**2 + dir_y**2)
+        dir_x, dir_y = dir_x / length, dir_y / length
+        b = 2 * (src_x * dir_x + src_y * dir_y)
+        c = src_x**2 + src_y**2 - 1.0
+        root = torch.sqrt(torch.clamp(b**2 - 4 * c, min=0))
+        t_entry = torch.clamp((-b - root) / 2, min=0)
+        t_exit = torch.maximum((-b + root) / 2, t_entry)
+        chord = t_exit - t_entry
+        centre = (self.img_size - 1) / 2
+        spacing = chord / (self.n_samples - 1) if self.n_samples > 1 else torch.zeros_like(chord)
+        rays = torch.stack(
+            (
+                (src_x + t_entry * dir_x + 1) * centre,
+                (src_y + t_entry * dir_y + 1) * centre,
+                spacing * dir_x * centre,
+                spacing * dir_y * centre,
+            ),
+            dim=-1,
+        )
+        steps = rays[..., 2:]
+        moving = steps.abs() > 1e-12
+        inv_steps = torch.where(moving, 1.0 / torch.where(moving, steps, torch.ones_like(steps)), 0.0)
+        weights = chord / self.n_samples
+        zeros = torch.zeros_like(cos_a)
+        pitch = self._det_width_norm / (self.n_det - 1)
+        lateral = (pose[:, 2:3] - pose[:, 1:2]) * self.shift_scale / pitch
+        views = torch.cat(
+            ((src_x + 1) * centre, (src_y + 1) * centre, cos_a, sin_a, sin_a, -cos_a, lateral, zeros), dim=-1
+        )
+        as32 = lambda t: t.to(torch.float32).contiguous()  # noqa: E731
+        return (
+            as32(rays.reshape(-1, 4)),
+            as32(inv_steps.reshape(-1, 2)),
+            as32(weights.reshape(-1)),
+            as32(views.reshape(-1, 4)),
+        )
 
     def _source_and_detector(self, pose: torch.Tensor, shape: tuple[int, ...]):
         """Source and detector centre for these views, shaped to broadcast over `shape`.
@@ -449,6 +471,8 @@ class FanBeam(BaseProjector):
         B = x.shape[0]
         if self._use_kernels(x):
             return _KernelProject.apply(x, self)
+        if self._use_geometry_kernels(x):
+            return _KernelGeometryProject.apply(x, self, *self._kernel_tables(x.device, differentiable=True))
 
         if self.circle:
             x = x * self.circle_mask.view(1, 1, self.img_size, self.img_size)

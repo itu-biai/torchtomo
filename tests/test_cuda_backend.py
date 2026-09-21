@@ -269,12 +269,16 @@ def test_approximate_mode_is_validated():
 
 
 def _shift(*projectors):
-    """The same per-view offsets on each projector: every view moved, by a different amount."""
+    """The same per-view offsets on each projector: every view moved, by a different amount.
+
+    Not round numbers: a whole-pixel shift on an odd-sized image puts the central
+    ray's samples exactly on pixels, where the bilinear slope is one-sided.
+    """
     for projector in projectors:
         n = projector.n_angles
-        shifts = dict(detector_shift=torch.linspace(-2.5, 3.5, n))
+        shifts = dict(detector_shift=torch.linspace(-2.37, 3.41, n))
         if "source_shift" in projector._POSE_COLUMNS:
-            shifts["source_shift"] = torch.linspace(1.5, -1.0, n)
+            shifts["source_shift"] = torch.linspace(1.43, -0.91, n)
         projector.set_pose(**shifts)
 
 
@@ -334,16 +338,97 @@ def test_shifted_approximate_mode_is_close_to_the_exact_pair(cls):
     assert ((a_approx - a_exact).norm() / a_exact.norm()) < 0.03
 
 
-@pytest.mark.parametrize("cls", [ParallelBeam, FanBeam])
-def test_geometry_gradient_leaves_the_kernels(cls):
-    """A pose that wants a gradient runs on the PyTorch path, and gets the same answer."""
+# Angles off the multiples of pi / 2, where every parallel sample lands on a pixel and
+# the bilinear slope is one-sided: there the two paths may take different sides.
+GRADIENT_CASES = [
+    (ParallelBeam, dict(img_size=32, n_angles=12, angle_range=(0.1, 3.0))),
+    (ParallelBeam, dict(img_size=33, n_angles=9, circle=False, angle_range=(0.1, 3.0))),
+    (FanBeam, dict(img_size=32, n_angles=12, angle_range=(0.1, 6.0))),
+    (FanBeam, dict(img_size=33, n_angles=9, circle=False, angle_range=(0.1, 6.0))),
+]
+
+
+def _count_calls(monkeypatch, name):
+    from torchtomo import _cuda_kernels
+
+    calls = []
+    original = getattr(_cuda_kernels, name)
+
+    def counted(*args, **kwargs):
+        calls.append(name)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(_cuda_kernels, name, counted)
+    return calls
+
+
+@pytest.mark.parametrize("operator", ["forward", "adjoint"])
+@pytest.mark.parametrize("case", GRADIENT_CASES, ids=[_ids(case) for case in GRADIENT_CASES])
+def test_geometry_gradient_kernels_match_pytorch_path(case, operator, monkeypatch):
+    """The opt-in gradient kernels against autograd through the PyTorch path in float64.
+
+    float64 because the float32 PyTorch path is not a reference: its grids round
+    differently, and a sample that lands on the other side of a pixel boundary
+    takes the other one-sided slope.
+    """
     _require_kernels()
-    eager, fast = _pair(cls, img_size=24, n_angles=10)
+    cls, kwargs = case
+    reference, fast = cls(**kwargs).cuda().double(), cls(**kwargs, backend="cuda").cuda()
+    _shift(reference, fast)
+    calls = _count_calls(monkeypatch, "parallel_pose_grad" if cls is ParallelBeam else "fan_ray_grad")
+    torch.manual_seed(5)
+    x = torch.rand(3, 1, fast.img_size, fast.img_size, device="cuda")
+    y = torch.rand(3, 1, fast.n_angles, fast.n_det, device="cuda")
+    weight = torch.rand_like(x if operator == "adjoint" else y)
+    grads = []
+    for projector, dtype in ((reference, torch.float64), (fast, torch.float32)):
+        projector.pose.requires_grad_(True)
+        out = projector.forward(x.to(dtype)) if operator == "forward" else projector.adjoint(y.to(dtype))
+        (grad,) = torch.autograd.grad((out * weight.to(dtype)).sum(), projector.pose)
+        grads.append(grad.double())
+    assert len(calls) == 1  # the kernel path ran, and the PyTorch path did not use it
+    scale = grads[0].abs().max().item()
+    assert scale > 0
+    torch.testing.assert_close(grads[1], grads[0], rtol=1e-4, atol=1e-4 * scale)
+
+
+@pytest.mark.parametrize("cls", [ParallelBeam, FanBeam])
+def test_geometry_gradient_kernels_keep_the_image_gradient(cls):
+    _require_kernels()
+    projector = cls(img_size=24, n_angles=10, backend="cuda").cuda()
+    _shift(projector)
+    projector.pose.requires_grad_(True)
+    x = torch.rand(2, 1, 24, 24, device="cuda", requires_grad=True)
+    g = torch.randn(2, 1, 10, projector.n_det, device="cuda")
+    grad_x, grad_pose = torch.autograd.grad(projector.forward(x), (x, projector.pose), g)
+    with torch.no_grad():
+        torch.testing.assert_close(grad_x, projector.adjoint(g))
+    assert grad_pose.abs().max() > 0
+
+
+@pytest.mark.parametrize("cls", [ParallelBeam, FanBeam])
+def test_geometry_gradient_kernels_are_first_order(cls):
+    """A second derivative through the geometry kernels raises rather than drops terms."""
+    _require_kernels()
+    projector = cls(img_size=16, n_angles=6, backend="cuda").cuda()
+    projector.pose.requires_grad_(True)
+    x = torch.rand(1, 1, 16, 16, device="cuda", requires_grad=True)
+    (grad_x,) = torch.autograd.grad(projector.forward(x).square().sum(), x, create_graph=True)
+    with pytest.raises(RuntimeError, match="once_differentiable"):
+        grad_x.sum().backward()
+
+
+@pytest.mark.parametrize("cls", [ParallelBeam, FanBeam])
+def test_approximate_geometry_gradient_is_the_exact_one(cls):
+    """approximate=True differentiates the geometry through the exact PyTorch path."""
+    _require_kernels()
+    exact = cls(img_size=24, n_angles=10).cuda()
+    approx = cls(img_size=24, n_angles=10, backend="cuda", approximate=True).cuda()
     x = torch.rand(1, 1, 24, 24, device="cuda")
     grads = []
-    for projector in (eager, fast):
+    for projector in (exact, approx):
         projector.pose.requires_grad_(True)
-        assert not projector._use_kernels(x)
+        assert not projector._use_geometry_kernels(x)
         (grad,) = torch.autograd.grad(projector.forward(x).square().sum(), projector.pose)
         grads.append(grad)
     torch.testing.assert_close(grads[1], grads[0])

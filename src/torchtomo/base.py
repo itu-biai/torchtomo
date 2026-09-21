@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 
 import torch
 import torch.nn as nn
+from torch.autograd.function import once_differentiable
 
 from ._cuda_kernels import cuda_kernels_available
 from ._nvrtc import runtime_available
@@ -80,6 +81,54 @@ class _KernelAdjoint(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_image: torch.Tensor):
         return _KernelProject.apply(grad_image, ctx.projector), None
+
+
+class _KernelGeometryProject(torch.autograd.Function):
+    """A x on the CUDA kernels for a geometry that wants a gradient.
+
+    The kernel tables arrive as inputs, built from the pose inside the graph, and
+    the geometry-gradient kernels return theirs; autograd carries those the rest of
+    the way to the pose. First order only: the table gradients come from a kernel
+    with no derivative of its own, so a second derivative raises instead of quietly
+    missing the terms that pass through the geometry.
+    """
+
+    @staticmethod
+    def forward(ctx, image: torch.Tensor, projector: "BaseProjector", *tables: torch.Tensor) -> torch.Tensor:
+        ctx.projector = projector
+        ctx.save_for_backward(image, *tables)
+        return projector._kernel_forward(image, tables)
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_sinogram: torch.Tensor):
+        image, *tables = ctx.saved_tensors
+        projector = ctx.projector
+        grad_sinogram = grad_sinogram.contiguous()
+        grad_image = projector._kernel_adjoint(grad_sinogram, tables) if ctx.needs_input_grad[0] else None
+        grad_tables = projector._kernel_table_grads(image, grad_sinogram, tables)
+        return (grad_image, None, *grad_tables)
+
+
+class _KernelGeometryAdjoint(torch.autograd.Function):
+    """A^T y on the CUDA kernels for a geometry that wants a gradient; see above."""
+
+    @staticmethod
+    def forward(ctx, sinogram: torch.Tensor, projector: "BaseProjector", *tables: torch.Tensor) -> torch.Tensor:
+        ctx.projector = projector
+        ctx.save_for_backward(sinogram, *tables)
+        return projector._kernel_adjoint(sinogram, tables)
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_image: torch.Tensor):
+        sinogram, *tables = ctx.saved_tensors
+        projector = ctx.projector
+        grad_image = grad_image.contiguous()
+        grad_sinogram = projector._kernel_forward(grad_image, tables) if ctx.needs_input_grad[0] else None
+        # <u, A^T y> = <A u, y>: the forward's table gradient with the roles swapped.
+        grad_tables = projector._kernel_table_grads(grad_image, sinogram, tables)
+        return (grad_sinogram, None, *grad_tables)
 
 
 class _KernelBackproject(torch.autograd.Function):
@@ -292,15 +341,27 @@ class BaseProjector(nn.Module, ABC):
     def _use_kernels(self, tensor: torch.Tensor) -> bool:
         """backend='cuda' on a float32 CUDA tensor with NVRTC available; else the PyTorch path.
 
-        A geometry that wants a gradient takes the PyTorch path, which differentiates
-        the sampling grid itself. That covers approximate=True as well, whose inexact
-        operator pair would otherwise return a geometry gradient that does not belong
-        to the operator it came from. A shifted pose that wants no gradient stays on
-        the kernels, which read the shifts from their pose table.
+        A shifted pose stays on the kernels, which read the shifts from their view
+        table. A geometry that wants a gradient does not: forward() and adjoint()
+        then take _use_geometry_kernels, and everything else the PyTorch path.
         """
         if self._geometry_requires_grad():
             return False
         return self.backend == "cuda" and cuda_kernels_available(tensor.device, tensor.dtype)
+
+    def _use_geometry_kernels(self, tensor: torch.Tensor) -> bool:
+        """forward() or adjoint() of a geometry that wants a gradient, on the CUDA kernels.
+
+        The exact pair only: approximate=True is not the transpose of itself, so the
+        gradient it would give belongs to no operator, and it takes the exact PyTorch
+        path instead.
+        """
+        return (
+            self._geometry_requires_grad()
+            and not getattr(self, "approximate", False)
+            and self.backend == "cuda"
+            and cuda_kernels_available(tensor.device, tensor.dtype)
+        )
 
     def _kernel_cached(self, name: str, device: torch.device, build):
         """Build a kernel table once per device, as ordinary tensors even under inference_mode."""
@@ -331,15 +392,17 @@ class BaseProjector(nn.Module, ABC):
 
         def build(device):
             pose = self.pose.detach().to(device=device, dtype=torch.float64)
-            width = 2 if self._pose_is_plain() else 4
-            table = torch.zeros(self.n_angles, width, dtype=torch.float64, device=device)
-            table[:, 0] = torch.cos(pose[:, 0])
-            table[:, 1] = torch.sin(pose[:, 0])
-            if width == 4:
-                table[:, 2 : 1 + pose.shape[1]] = pose[:, 1:] * self._kernel_shift_unit
-            return table.to(torch.float32).contiguous()
+            return self._view_table(pose, 2 if self._pose_is_plain() else 4)
 
         return self._kernel_cached("pose", device, build)
+
+    def _view_table(self, pose: torch.Tensor, width: int) -> torch.Tensor:
+        """The view table from a float64 pose, differentiable in it; see _kernel_pose."""
+        columns = [torch.cos(pose[:, 0]), torch.sin(pose[:, 0])]
+        if width == 4:
+            columns += list((pose[:, 1:] * self._kernel_shift_unit).unbind(1))
+            columns += [torch.zeros_like(columns[0])] * (4 - len(columns))
+        return torch.stack(columns, dim=1).to(torch.float32).contiguous()
 
     def _kernel_coords(self, device: torch.device) -> torch.Tensor:
         """Pixel centres in normalised coordinates, as the eager grids use them."""
@@ -405,6 +468,9 @@ class BaseProjector(nn.Module, ABC):
         """
         if self._use_kernels(sinogram):
             return _KernelAdjoint.apply(sinogram, self)
+        if self._use_geometry_kernels(sinogram):
+            tables = self._kernel_tables(sinogram.device, differentiable=True)
+            return _KernelGeometryAdjoint.apply(sinogram, self, *tables)
         if self._geometry_requires_grad():
             # _DiscreteAdjoint hides the geometry from autograd by construction: its
             # backward is A, not d(A^T y)/d(geometry). Differentiating a throwaway
