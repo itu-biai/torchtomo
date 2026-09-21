@@ -233,9 +233,9 @@ class BaseProjector(nn.Module, ABC):
     def shift_scale(self) -> float:
         """One pixel of offset in the [-1, 1] coordinates the grids work in.
 
-        The image lattice is linspace(-1, 1, img_size), so a pixel is its spacing.
-        Both geometries measure every pose offset in these pixels, which for
-        parallel beam is also exactly one detector bin.
+        The image lattice is linspace(-1, 1, img_size), so a pixel is its spacing,
+        which for parallel beam is also exactly one detector bin. Fan beam measures
+        its distances against a slightly different pixel and overrides this.
         """
         return 2.0 / max(self.img_size - 1, 1)
 
@@ -279,10 +279,14 @@ class BaseProjector(nn.Module, ABC):
     def _use_kernels(self, tensor: torch.Tensor) -> bool:
         """backend='cuda' on a float32 CUDA tensor with NVRTC available; else the PyTorch path.
 
-        A geometry that wants a gradient takes the PyTorch path, which differentiates
-        the sampling grid itself.
+        Anything but a plain pose takes the PyTorch path, which builds its sampling
+        grids from the pose on every call and differentiates them. The kernel tables
+        are angles only, so they would quietly project the unshifted geometry; the
+        fallback is slower and right rather than fast and wrong. This covers
+        approximate=True as well, whose inexact operator pair would otherwise return
+        a geometry gradient that does not belong to the operator it came from.
         """
-        if self._geometry_requires_grad():
+        if not self._pose_is_plain():
             return False
         return self.backend == "cuda" and cuda_kernels_available(tensor.device, tensor.dtype)
 
@@ -351,10 +355,12 @@ class BaseProjector(nn.Module, ABC):
         roundoff.
 
         Differentiable with respect to sinogram, with backward gradient A g,
-        so this operator can be used inside Learned Primal-Dual networks.
-        Geometry must remain fixed between evaluation and backpropagation;
-        gradients with respect to geometry are not supported. Projector buffers
-        must have the same device and dtype as sinogram, as for forward().
+        so this operator can be used inside Learned Primal-Dual networks. It is
+        differentiable with respect to the pose table as well, at the cost of one
+        throwaway forward: the exact adjoint hides the geometry from autograd by
+        construction, so a pose that wants a gradient is differentiated through a
+        forward instead. Projector buffers must have the same device and dtype as
+        sinogram, as for forward().
 
         Parallel beam and fan beam on CPU and CUDA call grid_sample's input
         backward kernel directly. MPS and older PyTorch builds fall back to a
