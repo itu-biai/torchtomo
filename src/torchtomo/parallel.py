@@ -156,8 +156,6 @@ class ParallelBeam(BaseProjector):
 
         # Pixel size (assuming image spans [-1, 1])
         self.pixel_size = 2.0 / img_size
-        # One pixel of detector shift, in the [-1, 1] coordinates the grids use.
-        self.shift_scale = 2.0 / max(img_size - 1, 1)
 
         # The per-angle sampling grids are two multiplies and an add away from these,
         # and materialising them costs [n_angles, H, W, 2] floats twice over: 1.5 GB at

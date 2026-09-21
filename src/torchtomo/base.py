@@ -229,6 +229,16 @@ class BaseProjector(nn.Module, ABC):
         """Per-view lateral detector offset in pixels, column 1 of the pose table."""
         return self.pose[:, 1]
 
+    @property
+    def shift_scale(self) -> float:
+        """One pixel of offset in the [-1, 1] coordinates the grids work in.
+
+        The image lattice is linspace(-1, 1, img_size), so a pixel is its spacing.
+        Both geometries measure every pose offset in these pixels, which for
+        parallel beam is also exactly one detector bin.
+        """
+        return 2.0 / max(self.img_size - 1, 1)
+
     def _geometry_requires_grad(self) -> bool:
         """True when this call has to build the geometry inside the autograd graph."""
         return bool(self.pose.requires_grad) and torch.is_grad_enabled()
