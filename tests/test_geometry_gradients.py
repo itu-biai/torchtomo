@@ -198,6 +198,25 @@ class TestPoseGradients:
 
         assert torch.autograd.gradcheck(project, (pose,), eps=1e-6, atol=1e-8)
 
+    @pytest.mark.parametrize("operator", ["forward", "adjoint"])
+    @pytest.mark.parametrize("name", GEOMETRIES)
+    def test_gradgradcheck(self, name, operator):
+        """The PyTorch path differentiates the geometry a second time as well."""
+        tiny = dict(img_size=4, n_angles=3, angle_range=(0.2, 2.4))
+        if name == "fan":
+            tiny.update(n_det=5, det_width=3.0, n_samples=4)
+        projector = GEOMETRIES[name](**tiny)
+        torch.manual_seed(0)
+        image = torch.rand(1, 1, 4, 4, dtype=torch.float64)
+        sinogram = torch.rand(1, 1, 3, projector.n_det, dtype=torch.float64)
+        pose = projector.pose.detach().clone().requires_grad_(True)
+
+        def operate(pose_input):
+            projector.pose = pose_input
+            return projector.forward(image) if operator == "forward" else projector.adjoint(sinogram)
+
+        assert torch.autograd.gradgradcheck(operate, (pose,), eps=1e-6, atol=1e-6)
+
     @pytest.mark.parametrize("name", GEOMETRIES)
     def test_image_gradient_survives(self, name):
         """Differentiating the geometry must not cost the gradient we already had."""
@@ -213,3 +232,124 @@ class TestPoseGradients:
         # dL/dx is A^T w, whatever the geometry is doing.
         torch.testing.assert_close(image_grad, projector.adjoint(weight).detach())
         assert pose_grad.abs().max() > 0
+
+
+def _distance_difference(projector, loss, eps=1e-6):
+    """Central differences of `loss` in src_dist, det_dist and det_width."""
+    base = list(projector._distance_floats())
+    out = torch.zeros(3, dtype=torch.float64)
+    for index in range(3):
+        for sign in (1, -1):
+            values = list(base)
+            values[index] += sign * eps
+            projector.set_distances(*values)
+            with torch.no_grad():
+                out[index] += sign * float(loss()) / (2 * eps)
+    projector.set_distances(*base)
+    return out
+
+
+class TestFanDistances:
+    def test_distances_are_part_of_the_geometry(self):
+        fixed, learnable = _fan(), _fan(learnable_geometry=True)
+        assert "distances" in fixed.state_dict()
+        assert not isinstance(fixed.distances, torch.nn.Parameter)
+        assert any(p is learnable.distances for p in learnable.parameters())
+        torch.testing.assert_close(
+            fixed.distances, torch.tensor([32.0, 32.0, 12.0], dtype=torch.float64), rtol=0, atol=0
+        )
+        assert (fixed.src_dist, fixed.det_dist, fixed.det_width) == (32.0, 32.0, 12.0)
+
+    def test_set_distances_is_a_fresh_projector(self):
+        image = torch.rand(1, 1, 16, 16, dtype=torch.float64)
+        moved = _fan()
+        moved.forward(image)
+        moved.set_distances(src_dist=41.5, det_width=13.25)
+        fresh = _fan(src_dist=41.5, det_width=13.25)
+        assert torch.equal(moved.forward(image), fresh.forward(image))
+        assert torch.equal(moved.fbp(fresh.forward(image)), fresh.fbp(fresh.forward(image)))
+
+    @pytest.mark.parametrize("operator", ["forward", "adjoint", "fbp"])
+    def test_distance_gradient_matches_finite_differences(self, operator):
+        torch.manual_seed(0)
+        projector = _fan()
+        image = torch.rand(1, 1, 16, 16, dtype=torch.float64)
+        sinogram = torch.rand(1, 1, 5, projector.n_det, dtype=torch.float64)
+        weight = torch.rand_like(sinogram if operator == "forward" else image)
+
+        def loss():
+            if operator == "forward":
+                out = projector.forward(image)
+            elif operator == "adjoint":
+                out = projector.adjoint(sinogram)
+            else:
+                out = projector.fbp(sinogram)
+            return (out * weight).sum()
+
+        projector.distances.requires_grad_(True)
+        (analytic,) = torch.autograd.grad(loss(), projector.distances)
+        projector.distances.requires_grad_(False)
+        numeric = _distance_difference(projector, loss)
+        assert analytic.abs().max() > 1e-3
+        torch.testing.assert_close(analytic, numeric, atol=1e-6, rtol=1e-5)
+
+    def test_gradcheck_distances(self):
+        projector = _fan(img_size=4, n_angles=3, n_det=5, det_width=3.0, n_samples=4)
+        image = torch.rand(1, 1, 4, 4, dtype=torch.float64)
+        distances = projector.distances.detach().clone().requires_grad_(True)
+
+        def project(values):
+            projector.distances = values
+            return projector.forward(image)
+
+        assert torch.autograd.gradcheck(project, (distances,), eps=1e-6, atol=1e-8)
+
+    def test_an_optimiser_step_on_the_distances_is_never_stale(self):
+        projector = _fan(learnable_geometry=True)
+        image = torch.rand(1, 1, 16, 16, dtype=torch.float64)
+        before = projector.forward(image).detach().clone()
+        with torch.no_grad():
+            projector.distances[0] += 3.0
+            moved = projector.forward(image).clone()
+            fbp = projector.fbp(moved)
+        assert not torch.allclose(before, moved)
+        assert projector.src_dist == 35.0
+        reference = _fan(src_dist=35.0)
+        torch.testing.assert_close(moved, reference.forward(image))
+        torch.testing.assert_close(fbp, reference.fbp(moved))
+
+
+class TestConversionsAndCheckpoints:
+    def test_double_keeps_distances_float32_cannot_hold(self):
+        projector = FanBeam(img_size=16, n_angles=4, src_dist=33.3).double()
+        assert projector.distances[0].item() == 33.3
+
+    @pytest.mark.parametrize("name", GEOMETRIES)
+    def test_double_keeps_a_geometry_that_moved(self, name):
+        """.double() restores angles as built, and only those: a trained pose stays trained."""
+        projector = GEOMETRIES[name](learnable_geometry=True).float()
+        with torch.no_grad():
+            projector.pose[:, 0] += 0.01
+        moved = projector.angles.detach().clone()
+        projector.double()
+        torch.testing.assert_close(projector.angles, moved.double())
+
+    @pytest.mark.parametrize("name", GEOMETRIES)
+    def test_a_0_3_checkpoint_still_loads(self, name):
+        """0.3 saved `angles` and no pose or distances; strict loading must still work."""
+        saved = GEOMETRIES[name]().state_dict()
+        saved["angles"] = saved.pop("pose")[:, 0].clone()
+        saved.pop("distances", None)
+        projector = GEOMETRIES[name]()
+        projector.load_state_dict(saved)
+        torch.testing.assert_close(projector.angles, saved["angles"])
+
+    @pytest.mark.parametrize("name", GEOMETRIES)
+    def test_a_loaded_shift_is_used(self, name):
+        """Loading copies into the pose in place; the projector must still see the shift."""
+        shifted = GEOMETRIES[name]()
+        shifted.set_pose(detector_shift=1.25)
+        projector = GEOMETRIES[name]()
+        projector.load_state_dict(shifted.state_dict())
+        image = torch.rand(1, 1, 16, 16, dtype=torch.float64)
+        torch.testing.assert_close(projector.forward(image), shifted.forward(image))

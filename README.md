@@ -202,7 +202,8 @@ PYTHONPATH=src python benchmark/benchmark_adjoint.py --pairs 500 --dtype float64
 The geometry is a tensor, not a constant. Every projector carries a pose table of
 one row per view, `[angle, detector_shift]` for parallel beam and
 `[angle, detector_shift, source_shift]` for fan beam, with the shifts lateral and
-in pixels, and gradients reach it:
+in pixels. Fan beam also carries `distances`, `[src_dist, det_dist, det_width]` in
+pixels. Gradients reach all of it:
 
 ```python
 projector = ParallelBeam(img_size=256, n_angles=180, learnable_geometry=True)
@@ -213,12 +214,15 @@ loss.backward()          # projector.pose.grad is [180, 2]
 optimizer.step()
 ```
 
-`learnable_geometry=True` registers the pose as an `nn.Parameter`, so an optimiser
-reaches it through `.parameters()`. Without it the pose is an ordinary buffer:
-`projector.pose.requires_grad_(True)` still gives a one-off gradient, and
-`projector.set_pose(angles=..., detector_shift=...)` writes the geometry with no
-gradient at all. A pose built as an expression in some other parameter can be
-assigned straight to `projector.pose`, which is how one scalar drives every view.
+`learnable_geometry=True` registers the pose, and the fan's distances, as
+`nn.Parameter`s, so an optimiser reaches them through `.parameters()`. Without it
+they are ordinary buffers: `requires_grad_(True)` on either still gives a one-off
+gradient, and `projector.set_pose(angles=..., detector_shift=...)` or
+`fan.set_distances(src_dist=...)` writes the geometry with no gradient at all. A
+table built as an expression in some other parameter can be assigned straight to
+`projector.pose` or `fan.distances`, which is how one scalar drives every view.
+Both are in the state dict, so a learnt geometry travels with its checkpoint; 0.3
+checkpoints, which saved `angles` alone, still load with `strict=True`.
 
 A constant detector shift is a centre-of-rotation error, a per-view one is
 in-plane motion, and the angle column on its own is the sampling pattern.
@@ -239,8 +243,8 @@ has its minimum at 2.98 px at this size, and at 2.96 px at 128 px.
 With `backend="cuda"` or `"auto"`, `forward()` and `adjoint()` of a geometry that
 wants a gradient run on the CUDA kernels, with opt-in backward kernels that return
 the gradient of the view table (parallel) or ray table (fan) and let autograd
-carry it to the pose. They agree with a float64 reference to about 1e-5. On four
-images per batch:
+carry it to the pose and the distances. They agree with a float64 reference to
+about 1e-5. On four images per batch:
 
 | Geometry | Size, views | Pose gradient of | PyTorch path | CUDA kernels |
 | --- | --- | --- | --- | --- |
@@ -268,6 +272,7 @@ and are bit for bit the 0.3.0 kernels when nothing is shifted.
 - `projector.pose`: `[n_angles, 2]` or `[n_angles, 3]`, angle then lateral shifts
 - `projector.set_pose(angles=..., detector_shift=..., source_shift=...)`
 - `projector.angles`, `projector.detector_shift`, `fan.source_shift`
+- `fan.distances`: `[src_dist, det_dist, det_width]`; `fan.set_distances(...)`
 - `projector.forward(image)`
 - `projector.backward(sinogram)`: exact discrete adjoint, for LPD/iterative methods
 - `projector.adjoint(sinogram)`: equivalent to `backward(sinogram)`

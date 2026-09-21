@@ -233,8 +233,6 @@ class BaseProjector(nn.Module, ABC):
         # Whether the offset columns hold anything, so a geometry nobody has shifted
         # keeps the exact arithmetic, and the exact cost, it had before they existed.
         self._pose_has_offsets = bool(offsets is not None and bool(offsets.any()))
-        # Angles still as this projector was built; see _apply.
-        self._pose_pristine = True
         if self.learnable_geometry:
             self.register_parameter("pose", nn.Parameter(pose))
         else:
@@ -261,9 +259,7 @@ class BaseProjector(nn.Module, ABC):
                 column = self._POSE_COLUMNS.index(name)
                 self.pose[:, column] = torch.as_tensor(value, device=self.pose.device, dtype=self.pose.dtype)
         self._pose_has_offsets = bool(self.pose[:, 1:].any())
-        self._pose_pristine = angles is None and self._pose_pristine
-        self._kernel_cache = {}
-        self._invalidate_geometry()
+        self._geometry_changed()
 
     def __setattr__(self, name: str, value) -> None:
         super().__setattr__(name, value)
@@ -271,15 +267,31 @@ class BaseProjector(nn.Module, ABC):
             # Replacing the table wholesale is the other way to move the geometry,
             # and it is how a pose built as an expression in some other parameter
             # arrives. It has the same consequences as set_pose.
-            self._pose_pristine = False
             # A pose that can move is never on the plain path anyway, so do not
             # stop the device to ask whether its offsets are zero at this instant.
             self._pose_has_offsets = True if value.requires_grad else bool(value[:, 1:].any())
-            self._kernel_cache = {}
-            self._invalidate_geometry()
+            self._geometry_changed()
+
+    def _geometry_changed(self) -> None:
+        self._kernel_cache = {}
+        self._invalidate_geometry()
 
     def _invalidate_geometry(self) -> None:
-        """Drop anything precomputed from the pose; subclasses extend this."""
+        """Drop anything precomputed from the geometry; subclasses extend this."""
+
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        # 0.3 saved the angles on their own. They become the pose's first column, with
+        # every offset zero, so its checkpoints still load with strict=True.
+        angles_key, pose_key = prefix + "angles", prefix + "pose"
+        if angles_key in state_dict and pose_key not in state_dict:
+            angles = state_dict.pop(angles_key).reshape(-1)
+            pose = angles.new_zeros(angles.numel(), len(self._POSE_COLUMNS))
+            pose[:, 0] = angles
+            state_dict[pose_key] = pose
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+        # Loading copies into the table in place, which no flag or cache can see.
+        self._pose_has_offsets = bool(self.pose[:, 1:].any())
+        self._geometry_changed()
 
     @property
     def angles(self) -> torch.Tensor:
@@ -301,19 +313,23 @@ class BaseProjector(nn.Module, ABC):
         """
         return 2.0 / max(self.img_size - 1, 1)
 
+    def _geometry_tensors(self) -> tuple[torch.Tensor, ...]:
+        """Every tensor the geometry is made of; fan beam adds its distances."""
+        return (self.pose,)
+
     def _geometry_requires_grad(self) -> bool:
         """True when this call has to build the geometry inside the autograd graph."""
-        return bool(self.pose.requires_grad) and torch.is_grad_enabled()
+        return torch.is_grad_enabled() and any(t.requires_grad for t in self._geometry_tensors())
 
     def _geometry_is_mutable(self) -> bool:
-        """True when the pose can move, so nothing derived from it may be cached.
+        """True when the geometry can move, so nothing derived from it may be cached.
 
         An optimiser step writes into the pose in place and under no_grad, which no
         cache can see. Anything a moving geometry feeds is therefore rebuilt every
         call, including under no_grad, where the gradient itself is not wanted but
         the updated geometry still is.
         """
-        return bool(self.pose.requires_grad) or self.learnable_geometry
+        return self.learnable_geometry or any(t.requires_grad for t in self._geometry_tensors())
 
     def _pose_is_plain(self) -> bool:
         """True for a fixed geometry with no offsets: the arithmetic that predates them.
@@ -326,13 +342,14 @@ class BaseProjector(nn.Module, ABC):
         return not self._pose_has_offsets and not self._geometry_is_mutable()
 
     def _apply(self, fn, *args, **kwargs):
+        # Angles still exactly as built are restored from the float64 master after
+        # the cast, so .double() recovers the precision a float32 table lost. Angles
+        # something has moved, set_pose or an optimiser step, are kept as they are.
+        # Written in place, because a learnable pose is an nn.Parameter an
+        # optimiser may already be holding.
+        as_built = torch.equal(self.pose[:, 0].detach(), self._angle_samples(self.pose.device, self.pose.dtype))
         result = super()._apply(fn, *args, **kwargs)
-        if self._pose_pristine:
-            # Restore the angles from the float64 master so .double() recovers the
-            # precision a float32 table lost. Written in place, because a learnable
-            # pose is an nn.Parameter an optimiser may already be holding, and only
-            # while the angles are still the ones this projector was built with:
-            # set_pose() gives them up, and from then on the table is the master.
+        if as_built:
             with torch.no_grad():
                 self.pose[:, 0] = self._angle_samples(self.pose.device, self.pose.dtype)
         self._kernel_cache = {}

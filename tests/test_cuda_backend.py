@@ -382,14 +382,16 @@ def test_geometry_gradient_kernels_match_pytorch_path(case, operator, monkeypatc
     weight = torch.rand_like(x if operator == "adjoint" else y)
     grads = []
     for projector, dtype in ((reference, torch.float64), (fast, torch.float32)):
-        projector.pose.requires_grad_(True)
+        geometry = projector._geometry_tensors()
+        for tensor in geometry:
+            tensor.requires_grad_(True)
         out = projector.forward(x.to(dtype)) if operator == "forward" else projector.adjoint(y.to(dtype))
-        (grad,) = torch.autograd.grad((out * weight.to(dtype)).sum(), projector.pose)
-        grads.append(grad.double())
+        grads.append([g.double() for g in torch.autograd.grad((out * weight.to(dtype)).sum(), geometry)])
     assert len(calls) == 1  # the kernel path ran, and the PyTorch path did not use it
-    scale = grads[0].abs().max().item()
-    assert scale > 0
-    torch.testing.assert_close(grads[1], grads[0], rtol=1e-4, atol=1e-4 * scale)
+    for got, expected in zip(grads[1], grads[0]):  # the pose, then fan beam's distances
+        scale = expected.abs().max().item()
+        assert scale > 0
+        torch.testing.assert_close(got, expected, rtol=1e-4, atol=1e-4 * scale)
 
 
 @pytest.mark.parametrize("cls", [ParallelBeam, FanBeam])
