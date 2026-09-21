@@ -292,14 +292,13 @@ class BaseProjector(nn.Module, ABC):
     def _use_kernels(self, tensor: torch.Tensor) -> bool:
         """backend='cuda' on a float32 CUDA tensor with NVRTC available; else the PyTorch path.
 
-        Anything but a plain pose takes the PyTorch path, which builds its sampling
-        grids from the pose on every call and differentiates them. The kernel tables
-        are angles only, so they would quietly project the unshifted geometry; the
-        fallback is slower and right rather than fast and wrong. This covers
-        approximate=True as well, whose inexact operator pair would otherwise return
-        a geometry gradient that does not belong to the operator it came from.
+        A geometry that wants a gradient takes the PyTorch path, which differentiates
+        the sampling grid itself. That covers approximate=True as well, whose inexact
+        operator pair would otherwise return a geometry gradient that does not belong
+        to the operator it came from. A shifted pose that wants no gradient stays on
+        the kernels, which read the shifts from their pose table.
         """
-        if not self._pose_is_plain():
+        if self._geometry_requires_grad():
             return False
         return self.backend == "cuda" and cuda_kernels_available(tensor.device, tensor.dtype)
 
@@ -316,14 +315,31 @@ class BaseProjector(nn.Module, ABC):
             self._kernel_cache[key] = value
         return value
 
-    def _kernel_trig(self, device: torch.device) -> torch.Tensor:
-        """[n_angles, 2] float32 (cos, sin), computed in float64 from the angle buffer."""
+    @property
+    def _kernel_shift_unit(self) -> float:
+        """One pixel of pose offset in the kernels' length unit: lattice steps here."""
+        return 1.0
+
+    def _kernel_pose(self, device: torch.device) -> torch.Tensor:
+        """The kernels' view table in float32, built in float64 from the pose.
+
+        [n_angles, 2] of (cos, sin) for a plain pose, which runs the kernels exactly
+        as they were before shifts existed. Otherwise [n_angles, 4] with the detector
+        and source shift after them, in the kernels' own length unit and zero for a
+        column this geometry does not have; the width picks the shifted kernels.
+        """
 
         def build(device):
-            angles = self.angles.detach().to(device=device, dtype=torch.float64)
-            return torch.stack((torch.cos(angles), torch.sin(angles)), dim=-1).to(torch.float32).contiguous()
+            pose = self.pose.detach().to(device=device, dtype=torch.float64)
+            width = 2 if self._pose_is_plain() else 4
+            table = torch.zeros(self.n_angles, width, dtype=torch.float64, device=device)
+            table[:, 0] = torch.cos(pose[:, 0])
+            table[:, 1] = torch.sin(pose[:, 0])
+            if width == 4:
+                table[:, 2 : 1 + pose.shape[1]] = pose[:, 1:] * self._kernel_shift_unit
+            return table.to(torch.float32).contiguous()
 
-        return self._kernel_cached("trig", device, build)
+        return self._kernel_cached("pose", device, build)
 
     def _kernel_coords(self, device: torch.device) -> torch.Tensor:
         """Pixel centres in normalised coordinates, as the eager grids use them."""

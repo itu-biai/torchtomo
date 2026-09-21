@@ -266,3 +266,91 @@ def test_approximate_mode_is_validated():
         FanBeam(img_size=8, n_angles=4, backend="cuda", approximate=True, n_samples=1)
     # "auto" may land on the PyTorch path, which ignores it rather than refusing it.
     assert ParallelBeam(img_size=8, n_angles=4, backend="auto", approximate=True).approximate
+
+
+def _shift(*projectors):
+    """The same per-view offsets on each projector: every view moved, by a different amount."""
+    for projector in projectors:
+        n = projector.n_angles
+        shifts = dict(detector_shift=torch.linspace(-2.5, 3.5, n))
+        if "source_shift" in projector._POSE_COLUMNS:
+            shifts["source_shift"] = torch.linspace(1.5, -1.0, n)
+        projector.set_pose(**shifts)
+
+
+@pytest.mark.parametrize("case", GEOMETRIES, ids=[_ids(case) for case in GEOMETRIES])
+def test_shifted_pose_matches_pytorch_path(case):
+    """The kernels read the shifts from their pose table, and stay on the kernels."""
+    _require_kernels()
+    cls, kwargs = case
+    eager, fast = _pair(cls, **kwargs)
+    _shift(eager, fast)
+    torch.manual_seed(4)
+    x = torch.randn(3, 1, eager.img_size, eager.img_size, device="cuda")
+    y = torch.randn(3, 1, eager.n_angles, eager.n_det, device="cuda")
+    assert fast._use_kernels(x)
+    with torch.no_grad():
+        pairs = (
+            (fast.forward(x), eager.forward(x)),
+            (fast.adjoint(y), eager.adjoint(y)),
+            (fast.backproject(y), eager.backproject(y)),
+        )
+    for got, ref in pairs:
+        torch.testing.assert_close(got, ref, rtol=1e-4, atol=1e-4 * ref.abs().max().item())
+
+
+@pytest.mark.parametrize(
+    "case", GEOMETRIES[:2] + GEOMETRIES[3:5], ids=[_ids(c) for c in GEOMETRIES[:2] + GEOMETRIES[3:5]]
+)
+def test_shifted_adjoint_is_the_exact_transpose(case):
+    _require_kernels()
+    cls, kwargs = case
+    kwargs = dict(kwargs, img_size=12, n_angles=7)
+    projector = cls(**kwargs, backend="cuda").cuda()
+    _shift(projector)
+    size, n_rows = projector.img_size, projector.n_angles * projector.n_det
+    images = torch.eye(size * size, device="cuda").view(-1, 1, size, size)
+    sinograms = torch.eye(n_rows, device="cuda").view(-1, 1, projector.n_angles, projector.n_det)
+    with torch.no_grad():
+        forward = torch.cat([projector.forward(chunk) for chunk in images.split(64)]).reshape(size * size, n_rows)
+        adjoint = torch.cat([projector.adjoint(chunk) for chunk in sinograms.split(64)]).reshape(n_rows, size * size)
+    assert forward.abs().max() > 0
+    torch.testing.assert_close(adjoint, forward.t(), rtol=1e-5, atol=1e-6 * forward.abs().max().item())
+
+
+@pytest.mark.parametrize("cls", [ParallelBeam, FanBeam])
+def test_shifted_approximate_mode_is_close_to_the_exact_pair(cls):
+    _require_kernels()
+    from torchtomo import shepp_logan
+
+    exact = cls(img_size=128, n_angles=60, backend="cuda").cuda()
+    approx = cls(img_size=128, n_angles=60, backend="cuda", approximate=True).cuda()
+    _shift(exact, approx)
+    x = shepp_logan(128, device="cuda")
+    with torch.no_grad():
+        f_exact, f_approx = exact.forward(x), approx.forward(x)
+        a_exact, a_approx = exact.adjoint(f_exact), approx.adjoint(f_exact)
+    assert ((f_approx - f_exact).norm() / f_exact.norm()) < 1e-3
+    assert ((a_approx - a_exact).norm() / a_exact.norm()) < 0.03
+
+
+@pytest.mark.parametrize("cls", [ParallelBeam, FanBeam])
+def test_geometry_gradient_leaves_the_kernels(cls):
+    """A pose that wants a gradient runs on the PyTorch path, and gets the same answer."""
+    _require_kernels()
+    eager, fast = _pair(cls, img_size=24, n_angles=10)
+    x = torch.rand(1, 1, 24, 24, device="cuda")
+    grads = []
+    for projector in (eager, fast):
+        projector.pose.requires_grad_(True)
+        assert not projector._use_kernels(x)
+        (grad,) = torch.autograd.grad(projector.forward(x).square().sum(), projector.pose)
+        grads.append(grad)
+    torch.testing.assert_close(grads[1], grads[0])
+
+
+def test_triton_leaves_a_shifted_pose():
+    """Triton reads angles only, so a shifted pose leaves it."""
+    projector = ParallelBeam(img_size=16, n_angles=4, backend="triton")
+    projector.set_pose(detector_shift=1.0)
+    assert not projector._use_triton(torch.zeros(1, 1, 16, 16))

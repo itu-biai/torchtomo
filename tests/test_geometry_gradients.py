@@ -121,6 +121,17 @@ class TestPoseTable:
         assert fixed._buffers["ray_grids"] is not None
         assert learnable._buffers["ray_grids"] is None
 
+    def test_a_learnable_pose_never_reads_a_stale_matrix(self):
+        """sparse_adjoint builds its CSR matrix once; a moving pose must not use it."""
+        sparse = _parallel(learnable_geometry=True, sparse_adjoint=True)
+        dense = _parallel(learnable_geometry=True)
+        sinogram = torch.rand(1, 1, 5, 16, dtype=torch.float64)
+        with torch.no_grad():
+            sparse.adjoint(sinogram)
+            for projector in (sparse, dense):
+                projector.pose[:, 1] += 1.5
+            torch.testing.assert_close(sparse.adjoint(sinogram), dense.adjoint(sinogram))
+
     def test_set_pose_rejects_a_column_this_geometry_lacks(self):
         with pytest.raises(ValueError, match="source_shift"):
             _parallel().set_pose(source_shift=1.0)

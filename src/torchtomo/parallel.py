@@ -147,7 +147,9 @@ class ParallelBeam(BaseProjector):
                 optimiser reaches it through .parameters(). Off by default, where
                 the pose is an ordinary buffer and `pose.requires_grad_(True)` still
                 gives a one-off gradient. Either way the operators only differentiate
-                the geometry when it asks for a gradient.
+                the geometry when it asks for a gradient, and such a call runs on
+                the PyTorch path; a shifted pose that does not stays on the CUDA
+                kernels.
         """
         n_det = n_det or img_size
         super().__init__(img_size, n_angles, n_det, angle_range, angles=angles, learnable_geometry=learnable_geometry)
@@ -184,29 +186,32 @@ class ParallelBeam(BaseProjector):
         self.backend = "triton" if value else "torch"
 
     def _use_triton(self, tensor: torch.Tensor) -> bool:
-        return self.backend == "triton" and triton_kernels_available(tensor.device, tensor.dtype)
+        # The Triton kernels read angles only, so anything but a plain pose falls back.
+        return (
+            self.backend == "triton" and self._pose_is_plain() and triton_kernels_available(tensor.device, tensor.dtype)
+        )
 
     def _kernel_forward(self, x: torch.Tensor) -> torch.Tensor:
-        trig, mask = self._kernel_trig(x.device), self._kernel_mask(x.device)
+        pose, mask = self._kernel_pose(x.device), self._kernel_mask(x.device)
         if self.approximate:
-            return _cuda_kernels.parallel_forward_texture(x, trig, mask, self.pixel_size, self._kernel_cache)
-        return _cuda_kernels.parallel_forward(x, trig, mask, self.pixel_size)
+            return _cuda_kernels.parallel_forward_texture(x, pose, mask, self.pixel_size, self._kernel_cache)
+        return _cuda_kernels.parallel_forward(x, pose, mask, self.pixel_size)
 
     def _kernel_adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
         device = sinogram.device
-        trig, mask = self._kernel_trig(device), self._kernel_mask(device)
+        pose, mask = self._kernel_pose(device), self._kernel_mask(device)
         if self.approximate:
             # Summed along a ray, a pixel's bilinear tent is close to a linear tent
             # across the detector: the adjoint becomes a pixel-driven backprojection.
             coords = self._kernel_coords(device)
-            return _cuda_kernels.parallel_backproject(sinogram, trig, coords, mask, self.pixel_size)
-        return _cuda_kernels.parallel_adjoint(sinogram, trig, mask, self.pixel_size)
+            return _cuda_kernels.parallel_backproject(sinogram, pose, coords, mask, self.pixel_size)
+        return _cuda_kernels.parallel_adjoint(sinogram, pose, mask, self.pixel_size)
 
     def _kernel_backproject(self, sinogram: torch.Tensor) -> torch.Tensor:
         device = sinogram.device
         return _cuda_kernels.parallel_backproject(
             sinogram,
-            self._kernel_trig(device),
+            self._kernel_pose(device),
             self._kernel_coords(device),
             self._kernel_mask(device),
             float(self.angle_step),
@@ -403,7 +408,8 @@ class ParallelBeam(BaseProjector):
         operator is linear, so the image gradient does not depend on the image.
         """
         batch = sinogram.shape[0]
-        if self.sparse_adjoint:
+        # The matrix is built once, and an optimiser's in-place step would leave it stale.
+        if self.sparse_adjoint and not self._geometry_is_mutable():
             matrix = self._ensure_sparse_adjoint_matrix()
             return (matrix @ sinogram.reshape(batch, -1).t()).t().reshape(batch, 1, self.img_size, self.img_size)
         size = self.img_size

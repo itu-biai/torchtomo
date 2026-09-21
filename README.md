@@ -237,9 +237,11 @@ own bias rather than the optimiser's: at 128 px and 120 views the same script
 lands 0.043 px out, which is where that loss actually has its minimum.
 
 Geometry gradients run on the PyTorch path, in float64 as well, and are
-differentiable a second time. A pose that has been shifted or can move falls back
-from `backend="cuda"`, whose tables carry angles only, rather than quietly
-projecting the geometry the projector used to have.
+differentiable a second time; a projector with `backend="cuda"` takes that path
+for the calls that want one. A shifted pose that wants no gradient, such as a
+scanner with a calibrated axis offset, stays on the CUDA kernels, which read the
+shifts from their pose table and keep their exact adjoint. `backend="triton"`
+reads angles only, so a shifted pose falls back from it.
 
 ## API Snapshot
 

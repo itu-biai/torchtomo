@@ -93,8 +93,9 @@ class FanBeam(BaseProjector):
                 per-view detector and source shift in pixels, as an nn.Parameter so
                 an optimiser reaches it through .parameters(). Off by default, where
                 the pose is an ordinary buffer and `pose.requires_grad_(True)` still
-                gives a one-off gradient. A pose that has been shifted or can move
-                runs on the PyTorch path: the CUDA tables carry angles only.
+                gives a one-off gradient. A call whose geometry wants a gradient
+                runs on the PyTorch path; a shifted pose that does not stays on
+                the CUDA kernels.
         """
         src_dist = float(2 * img_size if src_dist is None else src_dist)
         det_dist = float(2 * img_size if det_dist is None else det_dist)
@@ -198,6 +199,11 @@ class FanBeam(BaseProjector):
         return self.scale
 
     @property
+    def _kernel_shift_unit(self) -> float:
+        # fan_backproject works in the eager path's normalised coordinates.
+        return self.shift_scale
+
+    @property
     def source_shift(self) -> torch.Tensor:
         """Per-view lateral source offset in pixels, column 2 of the pose table."""
         return self.pose[:, 2]
@@ -226,6 +232,7 @@ class FanBeam(BaseProjector):
                 (self._src_dist_norm + self._det_dist_norm) * centre,
                 self._det_width_norm / (self.n_det - 1) * centre,
                 (self.n_samples - 1) / (self.n_samples * centre),
+                shifted=not self._pose_is_plain(),
             )
         return _cuda_kernels.fan_adjoint(
             sinogram,
@@ -244,7 +251,7 @@ class FanBeam(BaseProjector):
         device = sinogram.device
         return _cuda_kernels.fan_backproject(
             sinogram,
-            self._kernel_trig(device),
+            self._kernel_pose(device),
             self._kernel_coords(device),
             self._kernel_mask(device),
             self._src_dist_norm,
@@ -260,15 +267,14 @@ class FanBeam(BaseProjector):
         inv_steps [n_angles * n_det, 2]: reciprocal of the step per axis, 0 where it is 0.
         weights [n_angles * n_det]: chord length over n_samples.
         views [n_angles * 2, 4]: source in pixels and detector direction, then the
-        source-to-detector direction; the adjoint uses them to find candidate bins.
+        detector normal and the view's bin offset, (source shift - detector shift)
+        over the bin pitch; the adjoint uses them to find candidate bins.
         """
 
         def build(device):
             f64 = torch.float64
-            angles = self.angles.detach().to(device=device, dtype=f64)
-            cos_a, sin_a = torch.cos(angles).view(-1, 1), torch.sin(angles).view(-1, 1)
-            src_x, src_y = -self._src_dist_norm * sin_a, self._src_dist_norm * cos_a
-            det_cx, det_cy = self._det_dist_norm * sin_a, -self._det_dist_norm * cos_a
+            pose = self.pose.detach().to(device=device, dtype=f64)
+            src_x, src_y, det_cx, det_cy, cos_a, sin_a = self._source_and_detector(pose, (-1, 1))
             half = self._det_width_norm / 2
             offsets = torch.linspace(-half, half, self.n_det, dtype=f64, device=device).view(1, -1)
             dir_x = det_cx + offsets * cos_a - src_x
@@ -297,8 +303,10 @@ class FanBeam(BaseProjector):
             inv_steps = torch.where(moving, 1.0 / torch.where(moving, steps, torch.ones_like(steps)), 0.0)
             weights = chord / self.n_samples
             zeros = torch.zeros_like(cos_a)
+            pitch = self._det_width_norm / (self.n_det - 1)
+            lateral = (pose[:, 2:3] - pose[:, 1:2]) * self.shift_scale / pitch
             views = torch.cat(
-                ((src_x + 1) * centre, (src_y + 1) * centre, cos_a, sin_a, sin_a, -cos_a, zeros, zeros), dim=-1
+                ((src_x + 1) * centre, (src_y + 1) * centre, cos_a, sin_a, sin_a, -cos_a, lateral, zeros), dim=-1
             )
             as32 = lambda t: t.to(torch.float32).contiguous()  # noqa: E731
             return (
@@ -390,13 +398,11 @@ class FanBeam(BaseProjector):
         src_x, src_y, det_cx, det_cy, cos_a, sin_a = self._source_and_detector(pose, (-1, 1, 1))
         px_x = grid_x - src_x
         px_y = grid_y - src_y
-        sd_x = det_cx - src_x
-        sd_y = det_cy - src_y
-        sd_len = torch.sqrt(sd_x**2 + sd_y**2)
-        sd_ux = sd_x / sd_len
-        sd_uy = sd_y / sd_len
-        proj_len = px_x * sd_ux + px_y * sd_uy
-        t = sd_len / (proj_len + 1e-8)
+        # Depth along the detector normal (sin, -cos), where the detector plane sits
+        # src + det from the source whatever the lateral shifts: the line from the
+        # source to a shifted detector centre is tilted and is not that normal.
+        proj_len = px_x * sin_a - px_y * cos_a
+        t = (self._src_dist_norm + self._det_dist_norm) / (proj_len + 1e-8)
         int_x = src_x + t * px_x
         int_y = src_y + t * px_y
         det_offset = (int_x - det_cx) * cos_a + (int_y - det_cy) * sin_a
