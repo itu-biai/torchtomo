@@ -100,6 +100,7 @@ class ParallelBeam(BaseProjector):
         angles: Optional[torch.Tensor] = None,
         backend: str = "torch",
         approximate: bool = False,
+        learnable_geometry: bool = False,
     ):
         """
         Initialize parallel beam projector.
@@ -141,14 +142,22 @@ class ParallelBeam(BaseProjector):
                 about 3e-4 relative error) and use a pixel-driven adjoint (linear
                 interpolation on the detector). Faster, but the forward and adjoint
                 are no longer each other's exact transpose. Off by default.
+            learnable_geometry: Register the pose table, [n_angles, 2] of angle and
+                per-view detector shift in pixels, as an nn.Parameter so an
+                optimiser reaches it through .parameters(). Off by default, where
+                the pose is an ordinary buffer and `pose.requires_grad_(True)` still
+                gives a one-off gradient. Either way the operators only differentiate
+                the geometry when it asks for a gradient.
         """
         n_det = n_det or img_size
-        super().__init__(img_size, n_angles, n_det, angle_range, angles=angles)
+        super().__init__(img_size, n_angles, n_det, angle_range, angles=angles, learnable_geometry=learnable_geometry)
 
         self.circle = circle
 
         # Pixel size (assuming image spans [-1, 1])
         self.pixel_size = 2.0 / img_size
+        # One pixel of detector shift, in the [-1, 1] coordinates the grids use.
+        self.shift_scale = 2.0 / max(img_size - 1, 1)
 
         # The per-angle sampling grids are two multiplies and an add away from these,
         # and materialising them costs [n_angles, H, W, 2] floats twice over: 1.5 GB at
@@ -223,10 +232,14 @@ class ParallelBeam(BaseProjector):
     def _cached_grid(self, kind: str, start: int, end: int, build) -> torch.Tensor:
         """Reuse a chunk's grid when the budget allows, otherwise rebuild it.
 
-        The geometry never changes, so a cached chunk is always valid for the device
-        and dtype it was built on. Anything that does not fit is simply not cached,
-        which keeps the memory bounded by the budget rather than by the geometry.
+        A fixed geometry never changes, so a cached chunk is always valid for the
+        device and dtype it was built on. Anything that does not fit is simply not
+        cached, which keeps the memory bounded by the budget rather than by the
+        geometry. A geometry that wants a gradient skips the cache: its grid carries
+        a graph, and its pose moves under every optimiser step.
         """
+        if self._geometry_is_mutable():
+            return build()
         key = (kind, start, end, self.grid_x.device, self.grid_x.dtype)
         cached = self._grid_cache.get(key)
         if cached is not None:
@@ -252,8 +265,15 @@ class ParallelBeam(BaseProjector):
         return self._cached_grid("forward", start, end, lambda: self._build_forward_grid(start, end))
 
     def _build_forward_grid(self, start: int, end: int) -> torch.Tensor:
-        angles = self.angles[start:end].view(-1, 1, 1)
+        pose = self.pose[start:end]
+        angles = pose[:, 0].view(-1, 1, 1)
         cos_a, sin_a = torch.cos(angles), torch.sin(angles)
+        if not self._pose_is_plain():
+            # Detector bin w reads the ray at detector coordinate coords[w] + shift,
+            # so the shift enters as a per-view translation of the rotated lattice.
+            offset = pose[:, 1].view(-1, 1, 1) * self.shift_scale
+            x = self.grid_x + offset
+            return torch.stack((x * cos_a + self.grid_y * sin_a, self.grid_y * cos_a - x * sin_a), dim=-1)
         planes = self._coordinate_pair(end - start)
         torch.mul(self.grid_x, cos_a, out=planes[0])
         planes[0].addcmul_(self.grid_y, sin_a)
@@ -266,12 +286,24 @@ class ParallelBeam(BaseProjector):
         return self._cached_grid("backward", start, end, lambda: self._build_backward_grid(start, end))
 
     def _build_backward_grid(self, start: int, end: int) -> torch.Tensor:
-        angles = self.angles[start:end].view(-1, 1, 1)
+        pose = self.pose[start:end]
+        angles = pose[:, 0].view(-1, 1, 1)
+        if not self._pose_is_plain():
+            # A pixel at detector coordinate t is read from bin t - shift, which is
+            # what makes this the transpose of the shifted forward.
+            detector = self.grid_x * torch.cos(angles) - self.grid_y * torch.sin(angles)
+            detector = detector - pose[:, 1].view(-1, 1, 1) * self.shift_scale
+            return torch.stack((detector, torch.zeros_like(detector)), dim=-1)
         planes = self._coordinate_pair(end - start)
         torch.mul(self.grid_x, torch.cos(angles), out=planes[0])
         planes[0].addcmul_(self.grid_y, -torch.sin(angles))
         planes[1].zero_()
         return planes.permute(1, 2, 3, 0).contiguous()
+
+    def _invalidate_geometry(self) -> None:
+        self._grid_cache = {}
+        self._grid_cache_used = 0
+        self._sparse_adjoint_matrix = None
 
     def _apply(self, fn, *args, **kwargs):
         # A cached grid belongs to the device and dtype it was built on.
