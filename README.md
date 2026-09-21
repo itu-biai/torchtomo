@@ -16,6 +16,8 @@ TorchTomo provides forward projection, an exact discrete adjoint, analytical bac
   they load), compiled at first use by the NVRTC that ships with PyTorch, so
   installation stays `pip install torchtomo`
 - Autograd-friendly operators for learned reconstruction pipelines
+- Gradients with respect to the geometry itself, not only the image: the
+  per-view pose table is a tensor an optimiser can move
 - Parallel-beam and fan-beam (flat detector) projectors
 - Built-in FBP filters: `ramp`, `shepp-logan`, `cosine`, `hamming`, `hann`, `none`
 - Built-in phantom generators for quick experiments
@@ -165,8 +167,8 @@ forward VJP. Both paths support `torch.no_grad()` and `torch.inference_mode()`.
 On MPS, bilinear sampling uses differentiable `gather` operations because some
 PyTorch versions also lack the first backward derivative of `grid_sample` on
 that device. Computation stays on MPS without requiring CPU fallback.
-Geometry is fixed and must not change between evaluation and backpropagation;
-geometry gradients are not supported. Match projector and input device/dtype.
+The geometry may move between calls, and it may carry a gradient; see
+Differentiable Geometry below. Match projector and input device/dtype.
 
 Default projection angles cover `[start, end)` with spacing `(end - start) / n`,
 so a half-turn does not include both 0 and pi. Pass `angles=` for an explicit list.
@@ -195,10 +197,58 @@ even for a correct adjoint. A reproducible 500-pair comparison is available with
 PYTHONPATH=src python benchmark/benchmark_adjoint.py --pairs 500 --dtype float64
 ```
 
+## Differentiable Geometry
+
+The geometry is a tensor, not a constant. Every projector carries a pose table of
+one row per view, `[angle, detector_shift]` for parallel beam and
+`[angle, detector_shift, source_shift]` for fan beam, with the shifts lateral and
+in pixels, and gradients reach it:
+
+```python
+projector = ParallelBeam(img_size=256, n_angles=180, learnable_geometry=True)
+optimizer = torch.optim.Adam(projector.parameters(), lr=0.5)
+
+loss = (projector.forward(projector.fbp(y)) - y).pow(2).mean()
+loss.backward()          # projector.pose.grad is [180, 2]
+optimizer.step()
+```
+
+`learnable_geometry=True` registers the pose as an `nn.Parameter`, so an optimiser
+reaches it through `.parameters()`. Without it the pose is an ordinary buffer:
+`projector.pose.requires_grad_(True)` still gives a one-off gradient, and
+`projector.set_pose(angles=..., detector_shift=...)` writes the geometry with no
+gradient at all. A pose built as an expression in some other parameter can be
+assigned straight to `projector.pose`, which is how one scalar drives every view.
+
+A constant detector shift is a centre-of-rotation error, a per-view one is
+in-plane motion, and the angle column on its own is the sampling pattern.
+`benchmark/calibrate_geometry.py` recovers a scanner's 3 px axis offset from the
+sinogram alone, with the phantom unknown, by descending
+`|| A_u fbp_u(y) - y ||^2` in the shift `u`:
+
+| Geometry | Recovered | Error | Time |
+| --- | --- | --- | --- |
+| parallel | 2.981 px | 0.019 px | 8.5 s |
+| fan | 2.963 px | 0.037 px | 12.1 s |
+
+256 px, 256 views, 80 Adam steps on an RTX 2080 Ti. Adding 5% noise to the
+sinogram moves the error to 0.027 and 0.043 px. What is left is the objective's
+own bias rather than the optimiser's: at 128 px and 120 views the same script
+lands 0.043 px out, which is where that loss actually has its minimum.
+
+Geometry gradients run on the PyTorch path, in float64 as well, and are
+differentiable a second time. A pose that has been shifted or can move falls back
+from `backend="cuda"`, whose tables carry angles only, rather than quietly
+projecting the geometry the projector used to have.
+
 ## API Snapshot
 
 - `ParallelBeam(..., backend="torch" | "cuda" | "triton" | "auto")`
 - `FanBeam(..., backend="torch" | "cuda" | "auto")`
+- `ParallelBeam(..., learnable_geometry=True)`, `FanBeam(..., learnable_geometry=True)`
+- `projector.pose`: `[n_angles, 2]` or `[n_angles, 3]`, angle then lateral shifts
+- `projector.set_pose(angles=..., detector_shift=..., source_shift=...)`
+- `projector.angles`, `projector.detector_shift`, `fan.source_shift`
 - `projector.forward(image)`
 - `projector.backward(sinogram)`: exact discrete adjoint, for LPD/iterative methods
 - `projector.adjoint(sinogram)`: equivalent to `backward(sinogram)`

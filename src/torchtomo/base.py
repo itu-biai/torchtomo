@@ -216,6 +216,19 @@ class BaseProjector(nn.Module, ABC):
         self._kernel_cache = {}
         self._invalidate_geometry()
 
+    def __setattr__(self, name: str, value) -> None:
+        super().__setattr__(name, value)
+        if name == "pose" and isinstance(value, torch.Tensor):
+            # Replacing the table wholesale is the other way to move the geometry,
+            # and it is how a pose built as an expression in some other parameter
+            # arrives. It has the same consequences as set_pose.
+            self._pose_pristine = False
+            # A pose that can move is never on the plain path anyway, so do not
+            # stop the device to ask whether its offsets are zero at this instant.
+            self._pose_has_offsets = True if value.requires_grad else bool(value[:, 1:].any())
+            self._kernel_cache = {}
+            self._invalidate_geometry()
+
     def _invalidate_geometry(self) -> None:
         """Drop anything precomputed from the pose; subclasses extend this."""
 
