@@ -132,21 +132,57 @@ class _KernelGeometryAdjoint(torch.autograd.Function):
 
 
 class _KernelBackproject(torch.autograd.Function):
-    """FBP backprojection on the CUDA kernels; the VJP differentiates the PyTorch path."""
+    """FBP backprojection on the CUDA kernels; the VJP is the kernel's own transpose."""
 
     @staticmethod
     def forward(ctx, sinogram: torch.Tensor, projector: "BaseProjector") -> torch.Tensor:
         ctx.projector = projector
-        ctx.sino_shape = tuple(sinogram.shape)
         return projector._kernel_backproject(sinogram)
 
     @staticmethod
     def backward(ctx, grad_image: torch.Tensor):
-        with torch.inference_mode(False), torch.enable_grad():
-            sino = torch.zeros(ctx.sino_shape, device=grad_image.device, dtype=grad_image.dtype, requires_grad=True)
-            recon = ctx.projector._backproject_eager(sino)
-            grad_sino = torch.autograd.grad(recon, sino, grad_image.contiguous())[0]
-        return grad_sino, None
+        # Through apply, so the gradient itself is differentiable (double backward).
+        return _KernelBackprojectTranspose.apply(grad_image.contiguous(), ctx.projector), None
+
+
+class _KernelBackprojectTranspose(torch.autograd.Function):
+    """B^T G on the CUDA kernels; the VJP is the backprojection."""
+
+    @staticmethod
+    def forward(ctx, grad_image: torch.Tensor, projector: "BaseProjector") -> torch.Tensor:
+        ctx.projector = projector
+        return projector._kernel_backproject_transpose(grad_image)
+
+    @staticmethod
+    def backward(ctx, grad_sinogram: torch.Tensor):
+        return _KernelBackproject.apply(grad_sinogram.contiguous(), ctx.projector), None
+
+
+class _KernelGeometryBackproject(torch.autograd.Function):
+    """FBP backprojection on the CUDA kernels for a geometry that wants a gradient.
+
+    As _KernelGeometryProject: the tables arrive built from the geometry inside the
+    graph, the backward kernels return the gradient of <G, B y> with respect to
+    them, and it is first order only.
+    """
+
+    @staticmethod
+    def forward(ctx, sinogram: torch.Tensor, projector: "BaseProjector", *tables: torch.Tensor) -> torch.Tensor:
+        ctx.projector = projector
+        ctx.save_for_backward(sinogram, *tables)
+        return projector._kernel_backproject(sinogram, tables)
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_image: torch.Tensor):
+        sinogram, *tables = ctx.saved_tensors
+        projector = ctx.projector
+        grad_image = grad_image.contiguous()
+        grad_sinogram = None
+        if ctx.needs_input_grad[0]:
+            grad_sinogram = projector._kernel_backproject_transpose(grad_image, tables)
+        grad_tables = projector._kernel_backproject_table_grads(sinogram, grad_image, tables)
+        return (grad_sinogram, None, *grad_tables)
 
 
 def _check_backend(backend: str, choices: tuple[str, ...]) -> str:
@@ -359,15 +395,16 @@ class BaseProjector(nn.Module, ABC):
         """backend='cuda' on a float32 CUDA tensor with NVRTC available; else the PyTorch path.
 
         A shifted pose stays on the kernels, which read the shifts from their view
-        table. A geometry that wants a gradient does not: forward() and adjoint()
-        then take _use_geometry_kernels, and everything else the PyTorch path.
+        table. A geometry that wants a gradient does not: forward(), adjoint() and
+        backproject() then take _use_geometry_kernels, and everything else the
+        PyTorch path.
         """
         if self._geometry_requires_grad():
             return False
         return self.backend == "cuda" and cuda_kernels_available(tensor.device, tensor.dtype)
 
     def _use_geometry_kernels(self, tensor: torch.Tensor) -> bool:
-        """forward() or adjoint() of a geometry that wants a gradient, on the CUDA kernels.
+        """forward(), adjoint() or backproject() of a geometry that wants a gradient, on the kernels.
 
         The exact pair only: approximate=True is not the transpose of itself, so the
         gradient it would give belongs to no operator, and it takes the exact PyTorch

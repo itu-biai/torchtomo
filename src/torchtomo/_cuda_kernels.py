@@ -336,6 +336,148 @@ def fan_ray_grad(
 
 
 # ---------------------------------------------------------------------------------
+# FBP backprojection, backward: its transpose, and its geometry gradient.
+# ---------------------------------------------------------------------------------
+
+_REDUCE_BLOCK = 256
+# Blocks per view for the geometry gradients: enough to fill the GPU at a few dozen
+# views, few enough that each block's atomics are a rounding error.
+_REDUCE_BLOCKS_PER_VIEW = 64
+
+
+def _reduce_grid(size: int, n_angles: int) -> tuple[int, int, int]:
+    return (min(math.ceil(size * size / _REDUCE_BLOCK), _REDUCE_BLOCKS_PER_VIEW), n_angles, 1)
+
+
+def parallel_backproject_transpose(
+    grad_image: torch.Tensor,
+    pose: torch.Tensor,
+    coords: torch.Tensor,
+    mask: torch.Tensor | None,
+    n_det: int,
+    scale: float,
+) -> torch.Tensor:
+    """[B, 1, S, S] -> [B, 1, A, n_det], the transpose of parallel_backproject."""
+    batch, size = grad_image.shape[0], grad_image.shape[-1]
+    n_angles = pose.shape[0]
+    flat = grad_image.reshape(batch, size * size)
+    mask = _flat_mask(mask)
+    out = grad_image.new_zeros(batch, 1, n_angles, n_det)
+    library = _kernels()
+    for start, count, width in _groups(batch, _GATHER_GROUP):
+        packed = _pack(flat, start, count, width, mask)
+        kernel = library.function(f"parallel_backproject_transpose{_variant(pose)}_c{width}", grad_image.device)
+        kernel(
+            _gather_grid(size),
+            _GATHER_BLOCK,
+            [packed, pose, coords, out[start], size, n_angles, n_det, count, n_angles * n_det, scale],
+        )
+    return out
+
+
+def fan_backproject_transpose(
+    grad_image: torch.Tensor,
+    pose: torch.Tensor,
+    coords: torch.Tensor,
+    mask: torch.Tensor | None,
+    n_det: int,
+    src: float,
+    det: float,
+    half_width: float,
+    scale: float,
+) -> torch.Tensor:
+    """[B, 1, S, S] -> [B, 1, A, n_det], the transpose of fan_backproject."""
+    batch, size = grad_image.shape[0], grad_image.shape[-1]
+    n_angles = pose.shape[0]
+    flat = grad_image.reshape(batch, size * size)
+    mask = _flat_mask(mask)
+    out = grad_image.new_zeros(batch, 1, n_angles, n_det)
+    library = _kernels()
+    for start, count, width in _groups(batch, _GATHER_GROUP):
+        packed = _pack(flat, start, count, width, mask)
+        kernel = library.function(f"fan_backproject_transpose{_variant(pose)}_c{width}", grad_image.device)
+        kernel(
+            _gather_grid(size),
+            _GATHER_BLOCK,
+            [
+                packed,
+                pose,
+                coords,
+                out[start],
+                size,
+                n_angles,
+                n_det,
+                src,
+                det,
+                half_width,
+                count,
+                n_angles * n_det,
+                scale,
+            ],
+        )
+    return out
+
+
+def parallel_backproject_grad(
+    sinogram: torch.Tensor,
+    grad_image: torch.Tensor,
+    pose: torch.Tensor,
+    coords: torch.Tensor,
+    mask: torch.Tensor | None,
+    scale: float,
+) -> torch.Tensor:
+    """d<G, B y> / d(view table), [A, 4] for the shifted table (cos, sin, s, 0). Summed over the batch."""
+    batch, _, n_angles, n_det = sinogram.shape
+    size = coords.numel()
+    flat = sinogram.reshape(batch, n_angles * n_det)
+    grad_flat = grad_image.reshape(batch, size * size)
+    mask = _flat_mask(mask)
+    out = torch.zeros(n_angles, 4, device=sinogram.device, dtype=torch.float32)
+    library = _kernels()
+    for start, count, width in _groups(batch, _GATHER_GROUP):
+        packed = _pack(flat, start, count, width)
+        packed_grad = _pack(grad_flat, start, count, width, mask)
+        kernel = library.function(f"parallel_backproject_grad_c{width}", sinogram.device)
+        kernel(
+            _reduce_grid(size, n_angles),
+            (_REDUCE_BLOCK, 1, 1),
+            [packed, packed_grad, pose, coords, out, size, n_det, scale],
+        )
+    return out
+
+
+def fan_backproject_grad(
+    sinogram: torch.Tensor,
+    grad_image: torch.Tensor,
+    pose: torch.Tensor,
+    coords: torch.Tensor,
+    mask: torch.Tensor | None,
+    src: float,
+    det: float,
+    half_width: float,
+    scale: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """d<G, B y> / d(view table) and / d(src, det, half_width): [A, 4] and [3]. Summed over the batch."""
+    batch, _, n_angles, n_det = sinogram.shape
+    size = coords.numel()
+    flat = sinogram.reshape(batch, n_angles * n_det)
+    grad_flat = grad_image.reshape(batch, size * size)
+    mask = _flat_mask(mask)
+    out = torch.zeros(n_angles, 8, device=sinogram.device, dtype=torch.float32)
+    library = _kernels()
+    for start, count, width in _groups(batch, _GATHER_GROUP):
+        packed = _pack(flat, start, count, width)
+        packed_grad = _pack(grad_flat, start, count, width, mask)
+        kernel = library.function(f"fan_backproject_grad_c{width}", sinogram.device)
+        kernel(
+            _reduce_grid(size, n_angles),
+            (_REDUCE_BLOCK, 1, 1),
+            [packed, packed_grad, pose, coords, out, size, n_det, src, det, half_width, scale],
+        )
+    return out[:, :4].contiguous(), out[:, 4:7].sum(dim=0)
+
+
+# ---------------------------------------------------------------------------------
 # Approximate mode: texture-sampled forwards and pixel-driven adjoints.
 # ---------------------------------------------------------------------------------
 
