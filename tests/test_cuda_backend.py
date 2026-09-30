@@ -121,15 +121,23 @@ def test_gradients_are_the_matched_operators(cls):
     torch.testing.assert_close(grad_y, projector.forward(g_image))
 
 
+@pytest.mark.parametrize("shifted", [False, True], ids=["plain", "shifted"])
 @pytest.mark.parametrize("cls", [ParallelBeam, FanBeam])
-def test_backproject_gradient_uses_the_pytorch_path(cls):
+def test_backproject_gradient_is_its_transpose(cls, shifted):
+    """The kernel backprojection's VJP is its own transpose, and agrees with the PyTorch path's."""
     _require_kernels()
     eager, fast = _pair(cls, img_size=16, n_angles=8)
+    if shifted:
+        _shift(eager, fast)
+    torch.manual_seed(2)
     y = torch.randn(2, 1, 8, eager.n_det, device="cuda", requires_grad=True)
     g = torch.randn(2, 1, 16, 16, device="cuda")
     (fast_grad,) = torch.autograd.grad(fast.backproject(y), y, g)
     (eager_grad,) = torch.autograd.grad(eager.backproject(y), y, g)
-    torch.testing.assert_close(fast_grad, eager_grad)
+    torch.testing.assert_close(fast_grad, eager_grad, rtol=1e-4, atol=1e-5)
+    with torch.no_grad():
+        image = fast.backproject(y)
+    assert abs((image * g).sum() - (y * fast_grad).sum()) <= 1e-5 * (image * g).abs().sum()
 
 
 @pytest.mark.parametrize("cls", [ParallelBeam, FanBeam])
@@ -434,6 +442,45 @@ def test_approximate_geometry_gradient_is_the_exact_one(cls):
         (grad,) = torch.autograd.grad(projector.forward(x).square().sum(), projector.pose)
         grads.append(grad)
     torch.testing.assert_close(grads[1], grads[0])
+
+
+@pytest.mark.parametrize("operator", ["backproject", "fbp"])
+@pytest.mark.parametrize("case", GRADIENT_CASES, ids=[_ids(case) for case in GRADIENT_CASES])
+def test_backproject_geometry_kernels_match_pytorch_path(case, operator, monkeypatch):
+    """backproject() and fbp() differentiate the geometry on the kernels, against float64."""
+    _require_kernels()
+    cls, kwargs = case
+    reference, fast = cls(**kwargs).cuda().double(), cls(**kwargs, backend="cuda").cuda()
+    _shift(reference, fast)
+    name = "parallel_backproject_grad" if cls is ParallelBeam else "fan_backproject_grad"
+    calls = _count_calls(monkeypatch, name)
+    torch.manual_seed(5)
+    y = torch.rand(3, 1, fast.n_angles, fast.n_det, device="cuda")
+    weight = torch.rand(3, 1, fast.img_size, fast.img_size, device="cuda")
+    grads = []
+    for projector, dtype in ((reference, torch.float64), (fast, torch.float32)):
+        geometry = projector._geometry_tensors()
+        for tensor in geometry:
+            tensor.requires_grad_(True)
+        sinogram = y.to(dtype).requires_grad_(True)
+        out = getattr(projector, operator)(sinogram)
+        grads.append([g.double() for g in torch.autograd.grad((out * weight.to(dtype)).sum(), (sinogram, *geometry))])
+    assert len(calls) == 1
+    for got, expected in zip(grads[1], grads[0]):  # the sinogram, the pose, then fan beam's distances
+        scale = expected.abs().max().item()
+        assert scale > 0
+        torch.testing.assert_close(got, expected, rtol=1e-4, atol=1e-4 * scale)
+
+
+@pytest.mark.parametrize("cls", [ParallelBeam, FanBeam])
+def test_backproject_geometry_kernels_are_first_order(cls):
+    _require_kernels()
+    projector = cls(img_size=16, n_angles=6, backend="cuda").cuda()
+    projector.pose.requires_grad_(True)
+    y = torch.rand(1, 1, 6, projector.n_det, device="cuda", requires_grad=True)
+    (grad_y,) = torch.autograd.grad(projector.fbp(y).square().sum(), y, create_graph=True)
+    with pytest.raises(RuntimeError, match="once_differentiable"):
+        grad_y.sum().backward()
 
 
 def test_triton_leaves_a_shifted_pose():
