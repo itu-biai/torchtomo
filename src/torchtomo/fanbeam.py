@@ -476,6 +476,14 @@ class FanBeam(BaseProjector):
             return self._precompute_backward_grids(start, end)
         return self.backward_grids[start:end], self.backward_weights[start:end]
 
+    def _backward_grid(self, start: int, end: int) -> torch.Tensor:
+        """Detector sampling grids for one chunk of views, [count, H, W, 2].
+
+        torchtomo-benchmark's iRadonMAP samples through these with its own learnt
+        weights, so the name outlives the move to _backward_chunk.
+        """
+        return self._backward_chunk(start, end)[0]
+
     def _precompute_ray_grids(self, start: int = 0, end: Optional[int] = None) -> tuple[torch.Tensor, torch.Tensor]:
         """Sampling grids [count, n_det, n_samples, 2] and path lengths [count, n_det]."""
         pose = self.pose[start : self.n_angles if end is None else end]
