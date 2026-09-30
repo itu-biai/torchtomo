@@ -8,7 +8,14 @@ import torch
 from . import _cuda_kernels
 from ._sampling import grid_sample_input_backward, sample_bilinear
 from ._triton_kernels import triton_adjoint, triton_backproject, triton_forward, triton_kernels_available
-from .base import BaseProjector, _check_backend, _KernelBackproject, _KernelGeometryProject, _KernelProject
+from .base import (
+    BaseProjector,
+    _check_backend,
+    _KernelBackproject,
+    _KernelGeometryBackproject,
+    _KernelGeometryProject,
+    _KernelProject,
+)
 from .filters import FilterType, apply_filter
 
 
@@ -220,14 +227,41 @@ class ParallelBeam(BaseProjector):
             return _cuda_kernels.parallel_backproject(sinogram, pose, coords, mask, self.pixel_size)
         return _cuda_kernels.parallel_adjoint(sinogram, pose, mask, self.pixel_size)
 
-    def _kernel_backproject(self, sinogram: torch.Tensor) -> torch.Tensor:
+    def _backproject_tables(self, device: torch.device) -> tuple[torch.Tensor, ...]:
+        """The backprojection's view table, built from the pose inside the graph."""
+        return (self._view_table(self.pose.to(device=device, dtype=torch.float64), 4),)
+
+    def _kernel_backproject(self, sinogram: torch.Tensor, tables=None) -> torch.Tensor:
         device = sinogram.device
+        (pose,) = tables or (self._kernel_pose(device),)
         return _cuda_kernels.parallel_backproject(
-            sinogram,
-            self._kernel_pose(device),
+            sinogram, pose, self._kernel_coords(device), self._kernel_mask(device), float(self.angle_step)
+        )
+
+    def _kernel_backproject_transpose(self, grad_image: torch.Tensor, tables=None) -> torch.Tensor:
+        device = grad_image.device
+        (pose,) = tables or (self._kernel_pose(device),)
+        return _cuda_kernels.parallel_backproject_transpose(
+            grad_image,
+            pose,
             self._kernel_coords(device),
             self._kernel_mask(device),
+            self.n_det,
             float(self.angle_step),
+        )
+
+    def _kernel_backproject_table_grads(self, sinogram: torch.Tensor, grad_image: torch.Tensor, tables) -> tuple:
+        (pose,) = tables
+        device = sinogram.device
+        return (
+            _cuda_kernels.parallel_backproject_grad(
+                sinogram,
+                grad_image,
+                pose,
+                self._kernel_coords(device),
+                self._kernel_mask(device),
+                float(self.angle_step),
+            ),
         )
 
     def adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
@@ -506,6 +540,8 @@ class ParallelBeam(BaseProjector):
         """
         if self._use_kernels(sinogram):
             return _KernelBackproject.apply(sinogram, self)
+        if self._use_geometry_kernels(sinogram):
+            return _KernelGeometryBackproject.apply(sinogram, self, *self._backproject_tables(sinogram.device))
         if self._use_triton(sinogram):
             return _TritonBackproject.apply(sinogram, self)
         return self._backproject_eager(sinogram)

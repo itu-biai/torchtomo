@@ -8,7 +8,14 @@ import torch.nn as nn
 
 from . import _cuda_kernels
 from ._sampling import grid_sample_input_backward, sample_bilinear
-from .base import BaseProjector, _check_backend, _KernelBackproject, _KernelGeometryProject, _KernelProject
+from .base import (
+    BaseProjector,
+    _check_backend,
+    _KernelBackproject,
+    _KernelGeometryBackproject,
+    _KernelGeometryProject,
+    _KernelProject,
+)
 from .filters import FilterType, apply_filter
 
 # Grids only the PyTorch path reads: about 2.2 GB at 512 px and 360 angles.
@@ -360,17 +367,60 @@ class FanBeam(BaseProjector):
             (self.n_det - 1) / 2,
         )
 
-    def _kernel_backproject(self, sinogram: torch.Tensor) -> torch.Tensor:
-        device = sinogram.device
+    def _backproject_tables(self, device: torch.device) -> tuple[torch.Tensor, ...]:
+        """The backprojection's view table and (src, det, half width), inside the graph."""
+        pose = self.pose.to(device=device, dtype=torch.float64)
+        src, det, width = (self.distances.to(device=device, dtype=torch.float64) * self.scale).unbind()
+        lengths = torch.stack((src, det, width / 2)).to(torch.float32)
+        return self._view_table(pose, 4), lengths
+
+    def _backproject_arguments(self, tables):
+        """The view table and (src, det, half width) as floats, from `tables` when given."""
         src, det, width = self._length_floats()
+        pose = tables[0] if tables else None
+        return pose, src, det, width / 2
+
+    def _kernel_backproject(self, sinogram: torch.Tensor, tables=None) -> torch.Tensor:
+        device = sinogram.device
+        pose, src, det, half_width = self._backproject_arguments(tables)
         return _cuda_kernels.fan_backproject(
             sinogram,
-            self._kernel_pose(device),
+            self._kernel_pose(device) if pose is None else pose,
             self._kernel_coords(device),
             self._kernel_mask(device),
             src,
             det,
-            width / 2,
+            half_width,
+            float(self.angle_step) / 2,
+        )
+
+    def _kernel_backproject_transpose(self, grad_image: torch.Tensor, tables=None) -> torch.Tensor:
+        device = grad_image.device
+        pose, src, det, half_width = self._backproject_arguments(tables)
+        return _cuda_kernels.fan_backproject_transpose(
+            grad_image,
+            self._kernel_pose(device) if pose is None else pose,
+            self._kernel_coords(device),
+            self._kernel_mask(device),
+            self.n_det,
+            src,
+            det,
+            half_width,
+            float(self.angle_step) / 2,
+        )
+
+    def _kernel_backproject_table_grads(self, sinogram: torch.Tensor, grad_image: torch.Tensor, tables) -> tuple:
+        device = sinogram.device
+        pose, src, det, half_width = self._backproject_arguments(tables)
+        return _cuda_kernels.fan_backproject_grad(
+            sinogram,
+            grad_image,
+            pose,
+            self._kernel_coords(device),
+            self._kernel_mask(device),
+            src,
+            det,
+            half_width,
             float(self.angle_step) / 2,
         )
 
@@ -612,6 +662,8 @@ class FanBeam(BaseProjector):
         """
         if self._use_kernels(sinogram):
             return _KernelBackproject.apply(sinogram, self)
+        if self._use_geometry_kernels(sinogram):
+            return _KernelGeometryBackproject.apply(sinogram, self, *self._backproject_tables(sinogram.device))
         return self._backproject_eager(sinogram)
 
     def _backproject_eager(self, sinogram: torch.Tensor) -> torch.Tensor:

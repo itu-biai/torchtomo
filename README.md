@@ -232,19 +232,19 @@ sinogram alone, with the phantom unknown, by descending
 
 | Geometry | Recovered | Error | `backend="auto"` | `backend="torch"` |
 | --- | --- | --- | --- | --- |
-| parallel | 2.981 px | 0.019 px | 4.5 s | 8.5 s |
-| fan | 2.971 px | 0.029 px | 5.6 s | 12.1 s |
+| parallel | 2.981 px | 0.019 px | 1.3 s | 8.5 s |
+| fan | 2.971 px | 0.029 px | 0.8 s | 12.1 s |
 
 256 px, 256 views, 80 Adam steps on an RTX 2080 Ti. Adding 5% noise to the
 sinogram moves the errors to 0.026 and 0.035 px. What is left is the objective's
 own bias rather than the optimiser's: swept over the shift, the parallel-beam loss
 has its minimum at 2.98 px at this size, and at 2.96 px at 128 px.
 
-With `backend="cuda"` or `"auto"`, `forward()` and `adjoint()` of a geometry that
-wants a gradient run on the CUDA kernels, with opt-in backward kernels that return
-the gradient of the view table (parallel) or ray table (fan) and let autograd
-carry it to the pose and the distances. They agree with a float64 reference to
-about 1e-5. On four images per batch:
+With `backend="cuda"` or `"auto"`, `forward()`, `adjoint()`, `backproject()` and
+`fbp()` of a geometry that wants a gradient run on the CUDA kernels, with opt-in
+backward kernels that return the gradient of the view table (parallel) or ray
+table (fan), and of the fan's distances, and let autograd carry it to the pose.
+They agree with a float64 reference to about 1e-5. On four images per batch:
 
 | Geometry | Size, views | Pose gradient of | PyTorch path | CUDA kernels |
 | --- | --- | --- | --- | --- |
@@ -253,15 +253,24 @@ about 1e-5. On four images per batch:
 | parallel | 512, 360 | adjoint | out of memory | 4.52 ms |
 | fan | 256, 256 | forward | 108 ms | 4.06 ms |
 | fan | 512, 360 | forward | out of memory | 7.32 ms |
+| parallel | 256, 256 | backproject | 62.6 ms | 1.32 ms |
+| parallel | 512, 360 | backproject | 365 ms | 1.82 ms |
+| fan | 256, 256 | backproject | 85.7 ms | 1.68 ms |
+| fan | 512, 360 | backproject | out of memory | 4.01 ms |
+
+The backprojection's gradient is a reverse pass through its per-pixel arithmetic,
+reduced per view, so it keeps no sampling grid: a few tens of MiB where the PyTorch
+path's grids took gigabytes. Its sinogram gradient is the kernel's own transpose,
+for a fixed geometry as well.
 
 The kernel path is first order: a second derivative through it raises, where the
 PyTorch path (any device, float64 too) differentiates the geometry to any order.
-`fbp()` and `backproject()` differentiate the geometry on the PyTorch path, and
-`approximate=True` does so through the exact PyTorch path, since its inexact pair
-would give a gradient that belongs to no operator. A shifted pose that wants no
-gradient, such as a scanner with a calibrated axis offset, runs the ordinary CUDA
-kernels, which read the shifts from their view table, keep their exact adjoint,
-and are bit for bit the 0.3.0 kernels when nothing is shifted.
+`approximate=True` differentiates the geometry through the exact PyTorch path,
+since its inexact pair would give a gradient that belongs to no operator. A
+shifted pose that wants no gradient, such as a scanner with a calibrated axis
+offset, runs the ordinary CUDA kernels, which read the shifts from their view
+table, keep their exact adjoint, and are bit for bit the 0.3.0 kernels when
+nothing is shifted.
 `backend="triton"` reads angles only, so a shifted pose falls back from it.
 
 ## API Snapshot

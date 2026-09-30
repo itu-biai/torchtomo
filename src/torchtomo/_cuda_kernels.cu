@@ -856,6 +856,321 @@ TT_GEOMETRY_GRAD(2)
 TT_GEOMETRY_GRAD(4)
 
 // ---------------------------------------------------------------------------------
+// FBP backprojection, backward. The backprojection is pixel-driven: pixel p of view
+// a reads the detector at dpos(p, a), linearly, with weight w(p, a). Its transpose
+// scatters the image gradient back to those two bins. Its geometry gradient is the
+// reverse pass through the arithmetic of dpos and w, per pixel, reduced per view:
+// for an upstream gradient G at p, the value I and slope I' of the linear read,
+//   d<G, B y> / d dpos = w sum_k G_k I'_k,   d<G, B y> / d w = sum_k G_k I_k.
+// The upstream gradient arrives packed and already masked; `scale` is the
+// backprojection's own. Both read the shifted table, as the geometry path builds it.
+// ---------------------------------------------------------------------------------
+
+// Linear read of a packed detector row at dpos: value and slope per channel, with the
+// backprojection's zero padding outside the detector.
+template <int C>
+__device__ __forceinline__ void linear_read(const float* __restrict__ row, int n_det, float dpos, float& frac,
+                                            int& d0, float (&y0)[C], float (&y1)[C])
+{
+    const float f = floorf(dpos);
+    d0 = (int)f;
+    frac = dpos - f;
+#pragma unroll
+    for (int k = 0; k < C; ++k) y0[k] = y1[k] = 0.f;
+    if (d0 >= 0 && d0 < n_det) fetch<C>(row, d0, y0);
+    if (d0 + 1 >= 0 && d0 + 1 < n_det) fetch<C>(row, d0 + 1, y1);
+}
+
+// Sum of `v` over the block, into lane 0 of warp 0. `shared` holds one float per warp.
+__device__ __forceinline__ float block_sum(float v, float* shared)
+{
+#pragma unroll
+    for (int offset = 16; offset > 0; offset >>= 1) v += __shfl_xor_sync(0xffffffffu, v, offset);
+    const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+    __syncthreads();
+    if (lane == 0) shared[warp] = v;
+    __syncthreads();
+    v = 0.f;
+    if (warp == 0) {
+        const int warps = blockDim.x >> 5;
+        v = lane < warps ? shared[lane] : 0.f;
+#pragma unroll
+        for (int offset = 16; offset > 0; offset >>= 1) v += __shfl_xor_sync(0xffffffffu, v, offset);
+    }
+    return v;
+}
+
+// Parallel beam, table (cos, sin, s, 0): dpos = (x cos - y sin + 1) half - s bins_per_pixel,
+// weight 1. Out [A, 4]: d/dcos, d/dsin, d/ds, 0, accumulated per block.
+template <int C>
+__device__ void parallel_backproject_grad(const float* __restrict__ sino, const float* __restrict__ grad,
+                                          const float4* __restrict__ pose, const float* __restrict__ coords,
+                                          float* __restrict__ out, int S, int n_det, float scale)
+{
+    __shared__ float shared[32];
+    const int a = blockIdx.y;
+    const float4 t = pose[a];
+    const float half = 0.5f * (float)(n_det - 1);
+    const float bins_per_pixel = (float)(n_det - 1) / (float)max(S - 1, 1);
+    const float* row = sino + (size_t)a * n_det * C;
+    float sx = 0.f, sy = 0.f, se = 0.f;
+    for (int p = blockIdx.x * blockDim.x + threadIdx.x; p < S * S; p += gridDim.x * blockDim.x) {
+        float g[C];
+        fetch<C>(grad, p, g);
+        bool any = false;
+#pragma unroll
+        for (int k = 0; k < C; ++k) any |= g[k] != 0.f;
+        if (!any) continue;
+        const float nx = coords[p % S], ny = coords[p / S];
+        const float gproj = __fmaf_rn(ny, -t.y, nx * t.x);
+        const float dpos = __fmaf_rn(-t.z, bins_per_pixel, (gproj + 1.f) * half);
+        float frac, y0[C], y1[C];
+        int d0;
+        linear_read<C>(row, n_det, dpos, frac, d0, y0, y1);
+        float e = 0.f;
+#pragma unroll
+        for (int k = 0; k < C; ++k) e = __fmaf_rn(g[k], y1[k] - y0[k], e);
+        sx = __fmaf_rn(e, nx, sx);
+        sy = __fmaf_rn(e, ny, sy);
+        se += e;
+    }
+    sx = block_sum(sx, shared);
+    sy = block_sum(sy, shared);
+    se = block_sum(se, shared);
+    if (threadIdx.x == 0) {
+        float* o = out + (size_t)4 * a;
+        atomicAdd(o + 0, scale * half * sx);
+        atomicAdd(o + 1, -scale * half * sy);
+        atomicAdd(o + 2, -scale * bins_per_pixel * se);
+    }
+}
+
+// Fan beam, table (cos, sin, detector shift, source shift) and lengths (src, det,
+// half_width), all in normalised coordinates, exactly the arithmetic of
+// fan_backproject<C, true>. Out [A, 8]: d/dcos, d/dsin, d/d(detector shift),
+// d/d(source shift), d/dsrc, d/ddet, d/dhalf_width, 0; the caller sums the lengths'
+// columns over the views.
+template <int C>
+__device__ void fan_backproject_grad(const float* __restrict__ sino, const float* __restrict__ grad,
+                                     const float4* __restrict__ pose, const float* __restrict__ coords,
+                                     float* __restrict__ out, int S, int n_det, float src, float det,
+                                     float half_width, float scale)
+{
+    __shared__ float shared[32];
+    const int a = blockIdx.y;
+    const float4 t = pose[a];
+    const float cs = t.x, sn = t.y, sd = t.z, ss = t.w;
+    const float half = 0.5f * (float)(n_det - 1);
+    const float span = src + det;
+    const float src_x = __fmaf_rn(ss, cs, -src * sn), src_y = __fmaf_rn(ss, sn, src * cs);
+    const float det_x = __fmaf_rn(sd, cs, det * sn), det_y = __fmaf_rn(sd, sn, -det * cs);
+    const float* row = sino + (size_t)a * n_det * C;
+    float g_cs = 0.f, g_sn = 0.f, g_sd = 0.f, g_ss = 0.f, g_src = 0.f, g_det = 0.f, g_hw = 0.f;
+    for (int p = blockIdx.x * blockDim.x + threadIdx.x; p < S * S; p += gridDim.x * blockDim.x) {
+        float g[C];
+        fetch<C>(grad, p, g);
+        bool any = false;
+#pragma unroll
+        for (int k = 0; k < C; ++k) any |= g[k] != 0.f;
+        if (!any) continue;
+        const float gx = coords[p % S], gy = coords[p / S];
+        // Forward, as fan_backproject computes it.
+        const float px = gx - src_x, py = gy - src_y;
+        const float proj = px * sn - py * cs;
+        const float denom = proj + 1e-8f;
+        const float tt = span / denom;
+        const float ix = src_x + tt * px, iy = src_y + tt * py;
+        const float rx = ix - det_x, ry = iy - det_y;
+        const float offset = rx * cs + ry * sn;
+        const float dpos = (offset / half_width + 1.f) * half;
+        const float depth = gx * sn - gy * cs;
+        const float U = (src + depth) / src;
+        const float Uc = fmaxf(U, 1e-6f);
+        const float wgt = 1.f / (Uc * Uc);
+        float frac, y0[C], y1[C];
+        int d0;
+        linear_read<C>(row, n_det, dpos, frac, d0, y0, y1);
+        float value = 0.f, slope = 0.f;
+#pragma unroll
+        for (int k = 0; k < C; ++k) {
+            value = __fmaf_rn(g[k], __fmaf_rn(frac, y1[k] - y0[k], y0[k]), value);
+            slope = __fmaf_rn(g[k], y1[k] - y0[k], slope);
+        }
+        // Reverse pass.
+        const float g_w = value;
+        const float g_dpos = wgt * slope;
+        const float g_off = g_dpos * half / half_width;
+        g_hw -= g_off * offset / half_width;
+        const float g_ix = g_off * cs, g_iy = g_off * sn;
+        float l_cs = g_off * rx, l_sn = g_off * ry;
+        const float g_detx = -g_ix, g_dety = -g_iy;
+        const float g_tt = g_ix * px + g_iy * py;
+        float g_px = g_ix * tt, g_py = g_iy * tt;
+        float g_srcx = g_ix, g_srcy = g_iy;
+        const float g_proj = -g_tt * tt / denom;
+        const float g_span = g_tt / denom;
+        g_px += g_proj * sn;
+        g_py -= g_proj * cs;
+        l_sn += g_proj * px;
+        l_cs -= g_proj * py;
+        g_srcx -= g_px;
+        g_srcy -= g_py;
+        float l_src = g_span, l_det = g_span;
+        if (U > 1e-6f) {
+            const float g_U = -2.f * g_w * wgt / Uc;
+            l_sn += g_U * gx / src;
+            l_cs -= g_U * gy / src;
+            l_src -= g_U * depth / (src * src);
+        }
+        l_det += g_detx * sn - g_dety * cs;
+        l_sn += g_detx * det + g_dety * sd;
+        l_cs += g_detx * sd - g_dety * det;
+        g_sd += g_detx * cs + g_dety * sn;
+        l_src += -g_srcx * sn + g_srcy * cs;
+        l_sn += -g_srcx * src + g_srcy * ss;
+        l_cs += g_srcx * ss + g_srcy * src;
+        g_ss += g_srcx * cs + g_srcy * sn;
+        g_cs += l_cs;
+        g_sn += l_sn;
+        g_src += l_src;
+        g_det += l_det;
+    }
+    const float sums[7] = {g_cs, g_sn, g_sd, g_ss, g_src, g_det, g_hw};
+    float* o = out + (size_t)8 * a;
+#pragma unroll
+    for (int q = 0; q < 7; ++q) {
+        const float v = block_sum(sums[q], shared);
+        if (threadIdx.x == 0) atomicAdd(o + q, scale * v);
+    }
+}
+
+// Transposes: the image gradient scattered to the two bins each pixel read, per view.
+// out is unpacked [nb, A * n_det], zeroed by the caller.
+template <int C, bool SHIFTED>
+__device__ void parallel_backproject_transpose(const float* __restrict__ grad,
+                                               const typename view_table<SHIFTED>::type* __restrict__ pose,
+                                               const float* __restrict__ coords, float* __restrict__ out, int S,
+                                               int A, int n_det, int nb, int plane, float scale)
+{
+    const int j = blockIdx.x * blockDim.x + threadIdx.x;
+    const int i = blockIdx.y * blockDim.y + threadIdx.y;
+    if (i >= S || j >= S) return;
+    float g[C];
+    fetch<C>(grad, i * S + j, g);
+    bool any = false;
+#pragma unroll
+    for (int k = 0; k < C; ++k) any |= g[k] != 0.f;
+    if (!any) return;
+    const float nx = coords[j], ny = coords[i];
+    const float half = 0.5f * (float)(n_det - 1);
+    const float bins_per_pixel = (float)(n_det - 1) / (float)max(S - 1, 1);
+    for (int a = 0; a < A; ++a) {
+        const float4 t = as_view(pose[a]);
+        const float gproj = __fmaf_rn(ny, -t.y, nx * t.x);
+        float d = (gproj + 1.f) * half;
+        if constexpr (SHIFTED) d = __fmaf_rn(-t.z, bins_per_pixel, d);
+        const float f = floorf(d);
+        const int d0 = (int)f;
+        const float frac = d - f;
+        float* o = out + (size_t)a * n_det;
+#pragma unroll
+        for (int k = 0; k < C; ++k) {
+            if (k >= nb) continue;
+            if (d0 >= 0 && d0 < n_det) atomicAdd(o + (size_t)k * plane + d0, scale * (1.f - frac) * g[k]);
+            if (d0 + 1 >= 0 && d0 + 1 < n_det) atomicAdd(o + (size_t)k * plane + d0 + 1, scale * frac * g[k]);
+        }
+    }
+}
+
+template <int C, bool SHIFTED>
+__device__ void fan_backproject_transpose(const float* __restrict__ grad,
+                                          const typename view_table<SHIFTED>::type* __restrict__ pose,
+                                          const float* __restrict__ coords, float* __restrict__ out, int S, int A,
+                                          int n_det, float src, float det, float half_width, int nb, int plane,
+                                          float scale)
+{
+    const int j = blockIdx.x * blockDim.x + threadIdx.x;
+    const int i = blockIdx.y * blockDim.y + threadIdx.y;
+    if (i >= S || j >= S) return;
+    float g[C];
+    fetch<C>(grad, i * S + j, g);
+    bool any = false;
+#pragma unroll
+    for (int k = 0; k < C; ++k) any |= g[k] != 0.f;
+    if (!any) return;
+    const float gx = coords[j], gy = coords[i];
+    const float half = 0.5f * (float)(n_det - 1);
+    const float span = src + det;
+    for (int a = 0; a < A; ++a) {
+        const float4 t = as_view(pose[a]);
+        const float cs = t.x, sn = t.y;
+        float src_x = -src * sn, src_y = src * cs;
+        float det_x = det * sn, det_y = -det * cs;
+        if constexpr (SHIFTED) {
+            src_x = __fmaf_rn(t.w, cs, src_x);
+            src_y = __fmaf_rn(t.w, sn, src_y);
+            det_x = __fmaf_rn(t.z, cs, det_x);
+            det_y = __fmaf_rn(t.z, sn, det_y);
+        }
+        const float px = gx - src_x, py = gy - src_y;
+        const float proj = px * sn - py * cs;
+        const float tt = span / (proj + 1e-8f);
+        const float ix = src_x + tt * px, iy = src_y + tt * py;
+        const float offset = (ix - det_x) * cs + (iy - det_y) * sn;
+        const float dpos = (offset / half_width + 1.f) * half;
+        const float U = (src + gx * sn - gy * cs) / src;
+        const float Uc = fmaxf(U, 1e-6f);
+        const float wgt = scale / (Uc * Uc);
+        const float f = floorf(dpos);
+        const int d0 = (int)f;
+        const float frac = dpos - f;
+        float* o = out + (size_t)a * n_det;
+#pragma unroll
+        for (int k = 0; k < C; ++k) {
+            if (k >= nb) continue;
+            if (d0 >= 0 && d0 < n_det) atomicAdd(o + (size_t)k * plane + d0, wgt * (1.f - frac) * g[k]);
+            if (d0 + 1 >= 0 && d0 + 1 < n_det) atomicAdd(o + (size_t)k * plane + d0 + 1, wgt * frac * g[k]);
+        }
+    }
+}
+
+#define TT_BACKPROJECT_BACKWARD_VARIANT(C, TAG, SHIFTED, TABLE)                                               \
+    extern "C" __global__ void parallel_backproject_transpose##TAG##_c##C(                                    \
+        const float* grad, const TABLE* pose, const float* coords, float* out, int S, int A, int n_det,      \
+        int nb, int plane, float scale)                                                                       \
+    {                                                                                                         \
+        parallel_backproject_transpose<C, SHIFTED>(grad, pose, coords, out, S, A, n_det, nb, plane, scale);   \
+    }                                                                                                         \
+    extern "C" __global__ void fan_backproject_transpose##TAG##_c##C(                                         \
+        const float* grad, const TABLE* pose, const float* coords, float* out, int S, int A, int n_det,      \
+        float src, float det, float half_width, int nb, int plane, float scale)                               \
+    {                                                                                                         \
+        fan_backproject_transpose<C, SHIFTED>(grad, pose, coords, out, S, A, n_det, src, det, half_width, nb, \
+                                              plane, scale);                                                  \
+    }
+
+#define TT_BACKPROJECT_BACKWARD(C)                                                                            \
+    TT_BACKPROJECT_BACKWARD_VARIANT(C, , false, float2)                                                       \
+    TT_BACKPROJECT_BACKWARD_VARIANT(C, _shifted, true, float4)                                                \
+    extern "C" __global__ void __launch_bounds__(256) parallel_backproject_grad_c##C(                         \
+        const float* sino, const float* grad, const float4* pose, const float* coords, float* out, int S,     \
+        int n_det, float scale)                                                                               \
+    {                                                                                                         \
+        parallel_backproject_grad<C>(sino, grad, pose, coords, out, S, n_det, scale);                         \
+    }                                                                                                         \
+    extern "C" __global__ void __launch_bounds__(256) fan_backproject_grad_c##C(                              \
+        const float* sino, const float* grad, const float4* pose, const float* coords, float* out, int S,     \
+        int n_det, float src, float det, float half_width, float scale)                                       \
+    {                                                                                                         \
+        fan_backproject_grad<C>(sino, grad, pose, coords, out, S, n_det, src, det, half_width, scale);        \
+    }
+
+TT_BACKPROJECT_BACKWARD(1)
+TT_BACKPROJECT_BACKWARD(2)
+TT_BACKPROJECT_BACKWARD(4)
+TT_BACKPROJECT_BACKWARD(8)
+
+// ---------------------------------------------------------------------------------
 // Approximate mode (approximate=True). The forwards sample through the texture
 // units: hardware bilinear interpolation with 8-bit fractional weights, about 3e-4
 // relative error, one fetch for up to four images. The adjoints are pixel-driven:
