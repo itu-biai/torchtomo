@@ -4,10 +4,11 @@ from typing import Optional
 
 import numpy as np
 import torch
+import torch.nn as nn
 
 from . import _cuda_kernels
 from ._sampling import grid_sample_input_backward, sample_bilinear
-from .base import BaseProjector, _check_backend, _KernelBackproject, _KernelProject
+from .base import BaseProjector, _check_backend, _KernelBackproject, _KernelGeometryProject, _KernelProject
 from .filters import FilterType, apply_filter
 
 # Grids only the PyTorch path reads: about 2.2 GB at 512 px and 360 angles.
@@ -37,6 +38,9 @@ class FanBeam(BaseProjector):
         >>> recon = projector.fbp(sinogram)
     """
 
+    # Both shifts are lateral, perpendicular to the source-to-detector axis.
+    _POSE_COLUMNS = ("angle", "detector_shift", "source_shift")
+
     def __init__(
         self,
         img_size: int = 256,
@@ -52,6 +56,7 @@ class FanBeam(BaseProjector):
         angles: Optional[torch.Tensor] = None,
         backend: str = "torch",
         approximate: bool = False,
+        learnable_geometry: bool = False,
     ):
         """
         Initialize fan beam projector.
@@ -85,12 +90,20 @@ class FanBeam(BaseProjector):
                 interpolation on the detector with the fan's ray-spacing weight).
                 Faster, but the forward and adjoint are no longer each other's
                 exact transpose. Off by default.
+            learnable_geometry: Register the pose table, [n_angles, 3] of angle and
+                per-view detector and source shift in pixels, and `distances`, [3]
+                of src_dist, det_dist and det_width in pixels, as nn.Parameters so
+                an optimiser reaches them through .parameters(). Off by default,
+                where both are ordinary buffers and `requires_grad_(True)` on
+                either still gives a one-off gradient. With backend="cuda", forward() and
+                adjoint() differentiate the geometry on the kernels, to first
+                order; everything else, and every order, on the PyTorch path.
         """
         src_dist = float(2 * img_size if src_dist is None else src_dist)
         det_dist = float(2 * img_size if det_dist is None else det_dist)
         n_det = int(round(1.5 * img_size) if n_det is None else n_det)
         n_samples = int(img_size if n_samples is None else n_samples)
-        super().__init__(img_size, n_angles, n_det, angle_range, angles=angles)
+        super().__init__(img_size, n_angles, n_det, angle_range, angles=angles, learnable_geometry=learnable_geometry)
         self.backend = _check_backend(backend, ("auto", "torch", "cuda"))
         if approximate and backend not in ("cuda", "auto"):
             raise ValueError("approximate=True needs backend='cuda' or 'auto'")
@@ -98,26 +111,118 @@ class FanBeam(BaseProjector):
             raise ValueError("approximate=True needs at least two samples per ray")
         self.approximate = approximate
 
-        self.src_dist = src_dist
-        self.det_dist = det_dist
         magnification = (src_dist + det_dist) / src_dist
         if det_spacing is not None:
-            self.det_width = det_spacing * n_det
-        elif det_width is not None:
-            self.det_width = det_width
-        else:
-            self.det_width = 1.5 * magnification * img_size
+            det_width = det_spacing * n_det
+        elif det_width is None:
+            det_width = 1.5 * magnification * img_size
         self.n_samples = n_samples
         self.circle = circle
 
         self.scale = 2.0 / img_size
-        self._src_dist_norm = src_dist * self.scale
-        self._det_dist_norm = det_dist * self.scale
-        self._det_width_norm = self.det_width * self.scale
+        # The distances in float64 as built or last written; `distances` is the
+        # tensor a gradient reaches, in the dtype of the rest of the geometry.
+        self._distance_master = (src_dist, det_dist, float(det_width))
+        values = torch.tensor(self._distance_master, dtype=torch.float32)
+        if learnable_geometry:
+            self.register_parameter("distances", nn.Parameter(values))
+        else:
+            self.register_buffer("distances", values)
+        self._set_geometry_buffers()
+
+    @property
+    def src_dist(self) -> float:
+        """Source to isocentre in pixels; `distances[0]` is the tensor behind it."""
+        return self._distance_floats()[0]
+
+    @property
+    def det_dist(self) -> float:
+        """Isocentre to detector in pixels; `distances[1]` is the tensor behind it."""
+        return self._distance_floats()[1]
+
+    @property
+    def det_width(self) -> float:
+        """Detector width in pixels; `distances[2]` is the tensor behind it."""
+        return self._distance_floats()[2]
+
+    def set_distances(
+        self, src_dist: Optional[float] = None, det_dist: Optional[float] = None, det_width: Optional[float] = None
+    ) -> None:
+        """Write the fan's distances in pixels, with no gradient; see set_pose."""
+        values = list(self._distance_floats())
+        for index, value in enumerate((src_dist, det_dist, det_width)):
+            if value is not None:
+                values[index] = float(value)
+        self._distance_master = tuple(values)
+        with torch.no_grad():
+            self.distances.copy_(torch.tensor(values, dtype=self.distances.dtype))
+        self._geometry_changed()
+
+    def _distance_floats(self) -> tuple[float, float, float]:
+        """The distances in pixels as floats. A geometry that can move reads its tensor."""
+        if self._geometry_is_mutable():
+            src, det, width = self.distances.detach().double().cpu().tolist()
+            return src, det, width
+        return self._distance_master
+
+    def _lengths(self, dtype: torch.dtype, device: torch.device):
+        """(source, detector, width) in normalised coordinates, for building grids.
+
+        Floats for a fixed geometry, the arithmetic that predates learnable
+        distances; tensors from `distances`, inside the graph, for one that can move.
+        """
+        if self._geometry_is_mutable():
+            src, det, width = (self.distances.to(device=device, dtype=dtype) * self.scale).unbind()
+            return src, det, width
+        src, det, width = self._distance_master
+        return src * self.scale, det * self.scale, width * self.scale
+
+    def _length_floats(self) -> tuple[float, float, float]:
+        """(source, detector, width) in normalised coordinates, as kernel arguments."""
+        src, det, width = self._distance_floats()
+        return src * self.scale, det * self.scale, width * self.scale
+
+    def _detector_offsets(self, width, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
+        """Bin centres across the detector, -width / 2 to width / 2."""
+        if isinstance(width, torch.Tensor):
+            return torch.linspace(-1, 1, self.n_det, dtype=dtype, device=device) * (width / 2)
+        return torch.linspace(-width / 2, width / 2, self.n_det, dtype=dtype, device=device)
+
+    def _geometry_tensors(self) -> tuple[torch.Tensor, ...]:
+        return (self.pose, self.distances)
+
+    def __setattr__(self, name: str, value) -> None:
+        super().__setattr__(name, value)
+        if name == "distances" and isinstance(value, torch.Tensor):
+            # As for the pose: a table assigned wholesale moves the geometry.
+            if not value.requires_grad:
+                src, det, width = value.detach().double().cpu().tolist()
+                self._distance_master = (src, det, width)
+            self._geometry_changed()
+
+    def _geometry_changed(self) -> None:
+        super()._geometry_changed()
+        if "distances" in self._parameters or "distances" in self._buffers:
+            self._set_geometry_buffers()
+
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        # 0.3 checkpoints hold no distances: they are the ones the constructor was given.
+        key = prefix + "distances"
+        if key not in state_dict:
+            state_dict[key] = self.distances.detach().clone()
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+        src, det, width = self.distances.detach().double().cpu().tolist()
+        self._distance_master = (src, det, width)
         self._set_geometry_buffers()
 
     def _apply(self, fn, *args, **kwargs):
+        # The distances get the same treatment as the angles in BaseProjector._apply.
+        master = torch.tensor(self._distance_master, dtype=self.distances.dtype, device=self.distances.device)
+        as_built = torch.equal(self.distances.detach(), master)
         result = super()._apply(fn, *args, **kwargs)
+        if as_built:
+            with torch.no_grad():
+                self.distances.copy_(torch.tensor(self._distance_master, dtype=self.distances.dtype))
         self._set_geometry_buffers()
         return result
 
@@ -131,10 +236,9 @@ class FanBeam(BaseProjector):
         for name in _EAGER_GEOMETRY:
             self._set_buffer(name, None)
 
-        det_pos = torch.linspace(
-            -self._det_width_norm / 2, self._det_width_norm / 2, self.n_det, dtype=dtype, device=device
-        )
-        D = self._src_dist_norm + self._det_dist_norm
+        src, det, width = self._length_floats()
+        det_pos = torch.linspace(-width / 2, width / 2, self.n_det, dtype=dtype, device=device)
+        D = src + det
         cos_weight = D / torch.sqrt(D**2 + det_pos**2)
         self.register_buffer("cos_weight", cos_weight)
 
@@ -155,6 +259,11 @@ class FanBeam(BaseProjector):
         self._set_buffer("backward_grids", back_grids)
         self._set_buffer("backward_weights", weights)
 
+    def _invalidate_geometry(self) -> None:
+        # Back to None, so __getattr__ rebuilds them from the pose on the next read.
+        for name in _EAGER_GEOMETRY:
+            self._set_buffer(name, None)
+
     def _set_buffer(self, name: str, value: torch.Tensor | None) -> None:
         # register_buffer probes hasattr(), which would build a lazy buffer to replace it.
         if name in self._buffers:
@@ -172,8 +281,47 @@ class FanBeam(BaseProjector):
                 return buffers[name]
         return super().__getattr__(name)
 
-    def _kernel_forward(self, x: torch.Tensor) -> torch.Tensor:
-        rays, _, weights, _ = self._kernel_rays(x.device)
+    @property
+    def shift_scale(self) -> float:
+        """One pixel of pose offset in normalised coordinates.
+
+        Fan beam states src_dist, det_dist and det_width in pixels of 2 / img_size,
+        so a pose offset is measured in the same pixel and every length in this
+        geometry means the same thing.
+        """
+        return self.scale
+
+    @property
+    def _kernel_shift_unit(self) -> float:
+        # fan_backproject works in the eager path's normalised coordinates.
+        return self.shift_scale
+
+    @property
+    def source_shift(self) -> torch.Tensor:
+        """Per-view lateral source offset in pixels, column 2 of the pose table."""
+        return self.pose[:, 2]
+
+    def _kernel_tables(self, device: torch.device, differentiable: bool = False) -> tuple[torch.Tensor, ...]:
+        """What the kernels read; rays and weights in the graph when `differentiable`.
+
+        The adjoint's candidate search reads inv_steps and views too, but only to
+        find the rays it then evaluates exactly, so they carry no gradient.
+        """
+        if differentiable:
+            rays, inv_steps, weights, views = self._ray_tables(self.pose.to(device=device, dtype=torch.float64))
+            return rays, inv_steps.detach(), weights, views.detach()
+        return self._kernel_rays(device)
+
+    def _kernel_table_grads(self, image: torch.Tensor, grad: torch.Tensor, tables) -> tuple:
+        rays, _, weights, _ = tables
+        mask = self._kernel_mask(image.device)
+        grad_rays, grad_weights = _cuda_kernels.fan_ray_grad(
+            image, grad, rays, weights, mask, self.n_angles, self.n_det, self.n_samples
+        )
+        return grad_rays, None, grad_weights, None
+
+    def _kernel_forward(self, x: torch.Tensor, tables=None) -> torch.Tensor:
+        rays, _, weights, _ = tables or self._kernel_tables(x.device)
         mask = self._kernel_mask(x.device)
         if self.approximate:
             return _cuda_kernels.fan_forward_texture(
@@ -181,9 +329,10 @@ class FanBeam(BaseProjector):
             )
         return _cuda_kernels.fan_forward(x, rays, weights, mask, self.n_angles, self.n_det, self.n_samples)
 
-    def _kernel_adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
-        rays, inv_steps, weights, views = self._kernel_rays(sinogram.device)
-        alpha = (self._src_dist_norm + self._det_dist_norm) * (self.n_det - 1) / self._det_width_norm
+    def _kernel_adjoint(self, sinogram: torch.Tensor, tables=None) -> torch.Tensor:
+        rays, inv_steps, weights, views = tables or self._kernel_tables(sinogram.device)
+        src, det, width = self._length_floats()
+        alpha = (src + det) * (self.n_det - 1) / width
         if self.approximate:
             centre = (self.img_size - 1) / 2
             return _cuda_kernels.fan_adjoint_pixel(
@@ -193,9 +342,10 @@ class FanBeam(BaseProjector):
                 self.img_size,
                 alpha,
                 (self.n_det - 1) / 2,
-                (self._src_dist_norm + self._det_dist_norm) * centre,
-                self._det_width_norm / (self.n_det - 1) * centre,
+                (src + det) * centre,
+                width / (self.n_det - 1) * centre,
                 (self.n_samples - 1) / (self.n_samples * centre),
+                shifted=not self._pose_is_plain(),
             )
         return _cuda_kernels.fan_adjoint(
             sinogram,
@@ -212,14 +362,15 @@ class FanBeam(BaseProjector):
 
     def _kernel_backproject(self, sinogram: torch.Tensor) -> torch.Tensor:
         device = sinogram.device
+        src, det, width = self._length_floats()
         return _cuda_kernels.fan_backproject(
             sinogram,
-            self._kernel_trig(device),
+            self._kernel_pose(device),
             self._kernel_coords(device),
             self._kernel_mask(device),
-            self._src_dist_norm,
-            self._det_dist_norm,
-            self._det_width_norm / 2,
+            src,
+            det,
+            width / 2,
             float(self.angle_step) / 2,
         )
 
@@ -230,68 +381,108 @@ class FanBeam(BaseProjector):
         inv_steps [n_angles * n_det, 2]: reciprocal of the step per axis, 0 where it is 0.
         weights [n_angles * n_det]: chord length over n_samples.
         views [n_angles * 2, 4]: source in pixels and detector direction, then the
-        source-to-detector direction; the adjoint uses them to find candidate bins.
+        detector normal and the view's bin offset, (source shift - detector shift)
+        over the bin pitch; the adjoint uses them to find candidate bins.
         """
 
         def build(device):
-            f64 = torch.float64
-            angles = self.angles.detach().to(device=device, dtype=f64)
-            cos_a, sin_a = torch.cos(angles).view(-1, 1), torch.sin(angles).view(-1, 1)
-            src_x, src_y = -self._src_dist_norm * sin_a, self._src_dist_norm * cos_a
-            det_cx, det_cy = self._det_dist_norm * sin_a, -self._det_dist_norm * cos_a
-            half = self._det_width_norm / 2
-            offsets = torch.linspace(-half, half, self.n_det, dtype=f64, device=device).view(1, -1)
-            dir_x = det_cx + offsets * cos_a - src_x
-            dir_y = det_cy + offsets * sin_a - src_y
-            length = torch.sqrt(dir_x**2 + dir_y**2)
-            dir_x, dir_y = dir_x / length, dir_y / length
-            b = 2 * (src_x * dir_x + src_y * dir_y)
-            c = src_x**2 + src_y**2 - 1.0
-            root = torch.sqrt(torch.clamp(b**2 - 4 * c, min=0))
-            t_entry = torch.clamp((-b - root) / 2, min=0)
-            t_exit = torch.maximum((-b + root) / 2, t_entry)
-            chord = t_exit - t_entry
-            centre = (self.img_size - 1) / 2
-            spacing = chord / (self.n_samples - 1) if self.n_samples > 1 else torch.zeros_like(chord)
-            rays = torch.stack(
-                (
-                    (src_x + t_entry * dir_x + 1) * centre,
-                    (src_y + t_entry * dir_y + 1) * centre,
-                    spacing * dir_x * centre,
-                    spacing * dir_y * centre,
-                ),
-                dim=-1,
-            )
-            steps = rays[..., 2:]
-            moving = steps.abs() > 1e-12
-            inv_steps = torch.where(moving, 1.0 / torch.where(moving, steps, torch.ones_like(steps)), 0.0)
-            weights = chord / self.n_samples
-            zeros = torch.zeros_like(cos_a)
-            views = torch.cat(
-                ((src_x + 1) * centre, (src_y + 1) * centre, cos_a, sin_a, sin_a, -cos_a, zeros, zeros), dim=-1
-            )
-            as32 = lambda t: t.to(torch.float32).contiguous()  # noqa: E731
-            return (
-                as32(rays.reshape(-1, 4)),
-                as32(inv_steps.reshape(-1, 2)),
-                as32(weights.reshape(-1)),
-                as32(views.reshape(-1, 4)),
-            )
+            return self._ray_tables(self.pose.detach().to(device=device, dtype=torch.float64))
 
         return self._kernel_cached("rays", device, build)
 
-    def _precompute_ray_grids(self) -> tuple[torch.Tensor, torch.Tensor]:
-        """Sampling grids [n_angles, n_det, n_samples, 2] and path lengths [n_angles, n_det]."""
-        dtype, device = self.angles.dtype, self.angles.device
-        cos_a = torch.cos(self.angles).view(-1, 1)
-        sin_a = torch.sin(self.angles).view(-1, 1)
-        src_x = -self._src_dist_norm * sin_a
-        src_y = self._src_dist_norm * cos_a
-        det_cx = self._det_dist_norm * sin_a
-        det_cy = -self._det_dist_norm * cos_a
-        det_offsets = torch.linspace(
-            -self._det_width_norm / 2, self._det_width_norm / 2, self.n_det, dtype=dtype, device=device
-        ).view(1, -1)
+    def _ray_tables(self, pose: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """_kernel_rays from a float64 pose, differentiable in it."""
+        f64, device = torch.float64, pose.device
+        _, _, width = self._lengths(f64, device)
+        src_x, src_y, det_cx, det_cy, cos_a, sin_a = self._source_and_detector(pose, (-1, 1))
+        offsets = self._detector_offsets(width, f64, device).view(1, -1)
+        dir_x = det_cx + offsets * cos_a - src_x
+        dir_y = det_cy + offsets * sin_a - src_y
+        length = torch.sqrt(dir_x**2 + dir_y**2)
+        dir_x, dir_y = dir_x / length, dir_y / length
+        b = 2 * (src_x * dir_x + src_y * dir_y)
+        c = src_x**2 + src_y**2 - 1.0
+        root = torch.sqrt(torch.clamp(b**2 - 4 * c, min=0))
+        t_entry = torch.clamp((-b - root) / 2, min=0)
+        t_exit = torch.maximum((-b + root) / 2, t_entry)
+        chord = t_exit - t_entry
+        centre = (self.img_size - 1) / 2
+        spacing = chord / (self.n_samples - 1) if self.n_samples > 1 else torch.zeros_like(chord)
+        rays = torch.stack(
+            (
+                (src_x + t_entry * dir_x + 1) * centre,
+                (src_y + t_entry * dir_y + 1) * centre,
+                spacing * dir_x * centre,
+                spacing * dir_y * centre,
+            ),
+            dim=-1,
+        )
+        steps = rays[..., 2:]
+        moving = steps.abs() > 1e-12
+        inv_steps = torch.where(moving, 1.0 / torch.where(moving, steps, torch.ones_like(steps)), 0.0)
+        weights = chord / self.n_samples
+        zeros = torch.zeros_like(cos_a)
+        pitch = width / (self.n_det - 1)
+        lateral = (pose[:, 2:3] - pose[:, 1:2]) * self.shift_scale / pitch
+        views = torch.cat(
+            ((src_x + 1) * centre, (src_y + 1) * centre, cos_a, sin_a, sin_a, -cos_a, lateral, zeros), dim=-1
+        )
+        as32 = lambda t: t.to(torch.float32).contiguous()  # noqa: E731
+        return (
+            as32(rays.reshape(-1, 4)),
+            as32(inv_steps.reshape(-1, 2)),
+            as32(weights.reshape(-1)),
+            as32(views.reshape(-1, 4)),
+        )
+
+    def _source_and_detector(self, pose: torch.Tensor, shape: tuple[int, ...]):
+        """Source and detector centre for these views, shaped to broadcast over `shape`.
+
+        A lateral shift moves its end of the ray along the detector direction
+        (cos, sin), which is perpendicular to the source-to-detector axis. A
+        constant detector shift is a centre-of-rotation error; a per-view one is
+        in-plane motion; a source shift tilts the fan.
+        """
+        src, det, _ = self._lengths(pose.dtype, pose.device)
+        angles = pose[:, 0].view(shape)
+        cos_a, sin_a = torch.cos(angles), torch.sin(angles)
+        src_x = -src * sin_a
+        src_y = src * cos_a
+        det_cx = det * sin_a
+        det_cy = -det * cos_a
+        if not self._pose_is_plain():
+            det_u = pose[:, 1].view(shape) * self.shift_scale
+            src_u = pose[:, 2].view(shape) * self.shift_scale
+            src_x = src_x + src_u * cos_a
+            src_y = src_y + src_u * sin_a
+            det_cx = det_cx + det_u * cos_a
+            det_cy = det_cy + det_u * sin_a
+        return src_x, src_y, det_cx, det_cy, cos_a, sin_a
+
+    def _ray_chunk(self, start: int, end: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Ray grids and path lengths for one chunk of views.
+
+        A fixed geometry slices the buffers it built once; a geometry that can move
+        rebuilds the chunk, which is also the only size that fits: the whole set is
+        about 2.2 GB at 512 px and 360 angles.
+        """
+        if self._geometry_is_mutable():
+            return self._precompute_ray_grids(start, end)
+        return self.ray_grids[start:end], self.ray_lengths[start:end]
+
+    def _backward_chunk(self, start: int, end: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Backprojection grids and weights for one chunk of views; see _ray_chunk."""
+        if self._geometry_is_mutable():
+            return self._precompute_backward_grids(start, end)
+        return self.backward_grids[start:end], self.backward_weights[start:end]
+
+    def _precompute_ray_grids(self, start: int = 0, end: Optional[int] = None) -> tuple[torch.Tensor, torch.Tensor]:
+        """Sampling grids [count, n_det, n_samples, 2] and path lengths [count, n_det]."""
+        pose = self.pose[start : self.n_angles if end is None else end]
+        dtype, device = pose.dtype, pose.device
+        src_x, src_y, det_cx, det_cy, cos_a, sin_a = self._source_and_detector(pose, (-1, 1))
+        _, _, width = self._lengths(dtype, device)
+        det_offsets = self._detector_offsets(width, dtype, device).view(1, -1)
         det_x = det_cx + det_offsets * cos_a
         det_y = det_cy + det_offsets * sin_a
         dir_x = det_x - src_x
@@ -313,39 +504,33 @@ class FanBeam(BaseProjector):
         ray_y = src_y.unsqueeze(-1) + t_actual * dir_y.unsqueeze(-1)
         return torch.stack([ray_x, ray_y], dim=-1), ray_lengths
 
-    def _precompute_backward_grids(self) -> tuple[torch.Tensor, torch.Tensor]:
-        """Backprojection grids [n_angles, H, W, 2] and 1/U² weights [n_angles, H, W]."""
-        dtype, device = self.angles.dtype, self.angles.device
+    def _precompute_backward_grids(
+        self, start: int = 0, end: Optional[int] = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Backprojection grids [count, H, W, 2] and 1/U² weights [count, H, W]."""
+        pose = self.pose[start : self.n_angles if end is None else end]
+        dtype, device = pose.dtype, pose.device
         coords = torch.linspace(-1, 1, self.img_size, dtype=dtype, device=device)
         grid_y, grid_x = torch.meshgrid(coords, coords, indexing="ij")
-        cos_a = torch.cos(self.angles).view(-1, 1, 1)
-        sin_a = torch.sin(self.angles).view(-1, 1, 1)
-        src_x = -self._src_dist_norm * sin_a
-        src_y = self._src_dist_norm * cos_a
-        det_cx = self._det_dist_norm * sin_a
-        det_cy = -self._det_dist_norm * cos_a
+        src_x, src_y, det_cx, det_cy, cos_a, sin_a = self._source_and_detector(pose, (-1, 1, 1))
         px_x = grid_x - src_x
         px_y = grid_y - src_y
-        sd_x = det_cx - src_x
-        sd_y = det_cy - src_y
-        sd_len = torch.sqrt(sd_x**2 + sd_y**2)
-        sd_ux = sd_x / sd_len
-        sd_uy = sd_y / sd_len
-        proj_len = px_x * sd_ux + px_y * sd_uy
-        t = sd_len / (proj_len + 1e-8)
+        # Depth along the detector normal (sin, -cos), where the detector plane sits
+        # src + det from the source whatever the lateral shifts: the line from the
+        # source to a shifted detector centre is tilted and is not that normal.
+        proj_len = px_x * sin_a - px_y * cos_a
+        src, det, width = self._lengths(dtype, device)
+        t = (src + det) / (proj_len + 1e-8)
         int_x = src_x + t * px_x
         int_y = src_y + t * px_y
         det_offset = (int_x - det_cx) * cos_a + (int_y - det_cy) * sin_a
-        det_normalized = det_offset / (self._det_width_norm / 2)
+        det_normalized = det_offset / (width / 2)
         grid = torch.stack([det_normalized, torch.zeros_like(det_normalized)], dim=-1)
-        src = self._src_dist_norm
+        # Distance from the source plane, measured along the axis: a lateral shift
+        # slides both ends sideways and leaves this weight where it was.
         U = (src + grid_x * sin_a - grid_y * cos_a) / src
         weight = 1.0 / U.clamp_min(1e-6).square()
         return grid, weight
-
-    def _backward_grid(self, start: int, end: int) -> torch.Tensor:
-        """Detector sampling grids for one chunk of angles, shape [count, H, W, 2]."""
-        return self.backward_grids[start:end]
 
     def _direct_adjoint(self, sinogram: torch.Tensor) -> torch.Tensor:
         """A^T y by calling grid_sample's input backward, skipping a throwaway forward."""
@@ -354,12 +539,13 @@ class FanBeam(BaseProjector):
         chunk = self._angle_chunk_size(batch, self.n_det * self.n_samples, sinogram.device)
         out = torch.zeros(1, batch, size, size, device=sinogram.device, dtype=sinogram.dtype)
         shape_only = torch.empty(1, batch, size, size, device=sinogram.device, dtype=sinogram.dtype)
-        scale = self.ray_lengths / self.n_samples
         for start in range(0, self.n_angles, chunk):
             end = min(start + chunk, self.n_angles)
             angle_count = end - start
-            grid = self.ray_grids[start:end].reshape(1, angle_count * self.n_det, self.n_samples, 2)
-            grad = (sinogram[:, 0, start:end, :] * scale[start:end]).reshape(1, batch, angle_count * self.n_det, 1)
+            grids, lengths = self._ray_chunk(start, end)
+            grid = grids.reshape(1, angle_count * self.n_det, self.n_samples, 2)
+            scale = lengths / self.n_samples
+            grad = (sinogram[:, 0, start:end, :] * scale).reshape(1, batch, angle_count * self.n_det, 1)
             grad = grad.expand(1, batch, angle_count * self.n_det, self.n_samples)
             out += grid_sample_input_backward(grad, shape_only, grid)
         out = out.view(batch, 1, size, size)
@@ -380,6 +566,8 @@ class FanBeam(BaseProjector):
         B = x.shape[0]
         if self._use_kernels(x):
             return _KernelProject.apply(x, self)
+        if self._use_geometry_kernels(x):
+            return _KernelGeometryProject.apply(x, self, *self._kernel_tables(x.device, differentiable=True))
 
         if self.circle:
             x = x * self.circle_mask.view(1, 1, self.img_size, self.img_size)
@@ -391,10 +579,11 @@ class FanBeam(BaseProjector):
         for start in range(0, self.n_angles, chunk_size):
             end = min(start + chunk_size, self.n_angles)
             angle_count = end - start
-            grid = self.ray_grids[start:end].reshape(1, angle_count * self.n_det, self.n_samples, 2)
+            grids, lengths = self._ray_chunk(start, end)
+            grid = grids.reshape(1, angle_count * self.n_det, self.n_samples, 2)
             samples = sample_bilinear(x.reshape(1, B, size, size), grid)
             projection = samples.view(B, angle_count, self.n_det, self.n_samples).mean(dim=-1)
-            projection = projection * self.ray_lengths[start:end]
+            projection = projection * lengths
             projections.append(projection.unsqueeze(1))
 
         return torch.cat(projections, dim=2)
@@ -419,15 +608,16 @@ class FanBeam(BaseProjector):
 
     def _backproject_eager(self, sinogram: torch.Tensor) -> torch.Tensor:
         B = sinogram.shape[0]
-        recon = torch.zeros(B, 1, self.img_size, self.img_size, device=sinogram.device)
+        recon = torch.zeros(B, 1, self.img_size, self.img_size, device=sinogram.device, dtype=sinogram.dtype)
         chunk_size = self._angle_chunk_size(B, self.img_size * self.img_size, sinogram.device)
 
         for start in range(0, self.n_angles, chunk_size):
             end = min(start + chunk_size, self.n_angles)
             angle_count = end - start
             rows = sinogram[:, 0, start:end, :].permute(1, 0, 2).reshape(angle_count, B, 1, self.n_det)
-            contrib = sample_bilinear(rows, self.backward_grids[start:end])
-            weight = self.backward_weights[start:end].unsqueeze(1)
+            grids, weights = self._backward_chunk(start, end)
+            contrib = sample_bilinear(rows, grids)
+            weight = weights.unsqueeze(1)
             recon += (contrib * weight).sum(dim=0).unsqueeze(1)
 
         recon = recon * self.angle_step / 2
@@ -449,14 +639,20 @@ class FanBeam(BaseProjector):
         Returns:
             Reconstructed image [B, 1, H, W]
         """
-        cos_w = self.cos_weight.view(1, 1, 1, -1)
-        weighted_sino = sinogram * cos_w
+        if self._geometry_is_mutable():
+            # The weights of a geometry that can move, from its distances as they are.
+            src, det, width = self._lengths(sinogram.dtype, sinogram.device)
+            span = src + det
+            cos_w = span / torch.sqrt(span**2 + self._detector_offsets(width, sinogram.dtype, sinogram.device) ** 2)
+            virt_px = width / self.scale / self.n_det / (span / src)
+        else:
+            cos_w = self.cos_weight
+            # Ramp is built in bin units; convert to the virtual detector at the isocentre.
+            mag = (self.src_dist + self.det_dist) / self.src_dist
+            virt_px = self.det_width / self.n_det / mag
+        weighted_sino = sinogram * cos_w.view(1, 1, 1, -1)
 
         filtered_sino = apply_filter(weighted_sino, filter_name)
-
-        # Ramp is built in bin units; convert to the virtual detector at the isocentre.
-        mag = (self.src_dist + self.det_dist) / self.src_dist
-        virt_px = self.det_width / self.n_det / mag
         filtered_sino = filtered_sino * (self.img_size / 2) / virt_px
 
         recon = self.backproject(filtered_sino)

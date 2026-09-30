@@ -89,7 +89,14 @@ def _gather_bilinear(image: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
 
 
 def sample_bilinear(image: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
-    """Differentiable bilinear sampling on CPU, CUDA, and MPS."""
-    if image.device.type == "mps":
+    """Differentiable bilinear sampling on CPU, CUDA, and MPS.
+
+    A grid that wants a gradient samples through gather as well. grid_sample gives
+    a first derivative in the grid but no second one (`derivative for
+    aten::grid_sampler_2d_backward is not implemented`), and the adjoint is itself
+    a backward pass, so differentiating it with respect to the geometry needs that
+    second derivative. gather is ordinary tensor arithmetic and has every order.
+    """
+    if image.device.type == "mps" or (grid.requires_grad and torch.is_grad_enabled()):
         return _gather_bilinear(image, grid)
     return F.grid_sample(image, grid, mode="bilinear", padding_mode="zeros", align_corners=True)

@@ -16,6 +16,8 @@ TorchTomo provides forward projection, an exact discrete adjoint, analytical bac
   they load), compiled at first use by the NVRTC that ships with PyTorch, so
   installation stays `pip install torchtomo`
 - Autograd-friendly operators for learned reconstruction pipelines
+- Gradients with respect to the geometry itself, not only the image: the
+  per-view pose table is a tensor an optimiser can move
 - Parallel-beam and fan-beam (flat detector) projectors
 - Built-in FBP filters: `ramp`, `shepp-logan`, `cosine`, `hamming`, `hann`, `none`
 - Built-in phantom generators for quick experiments
@@ -165,8 +167,8 @@ forward VJP. Both paths support `torch.no_grad()` and `torch.inference_mode()`.
 On MPS, bilinear sampling uses differentiable `gather` operations because some
 PyTorch versions also lack the first backward derivative of `grid_sample` on
 that device. Computation stays on MPS without requiring CPU fallback.
-Geometry is fixed and must not change between evaluation and backpropagation;
-geometry gradients are not supported. Match projector and input device/dtype.
+The geometry may move between calls, and it may carry a gradient; see
+Differentiable Geometry below. Match projector and input device/dtype.
 
 Default projection angles cover `[start, end)` with spacing `(end - start) / n`,
 so a half-turn does not include both 0 and pi. Pass `angles=` for an explicit list.
@@ -195,10 +197,82 @@ even for a correct adjoint. A reproducible 500-pair comparison is available with
 PYTHONPATH=src python benchmark/benchmark_adjoint.py --pairs 500 --dtype float64
 ```
 
+## Differentiable Geometry
+
+The geometry is a tensor, not a constant. Every projector carries a pose table of
+one row per view, `[angle, detector_shift]` for parallel beam and
+`[angle, detector_shift, source_shift]` for fan beam, with the shifts lateral and
+in pixels. Fan beam also carries `distances`, `[src_dist, det_dist, det_width]` in
+pixels. Gradients reach all of it:
+
+```python
+projector = ParallelBeam(img_size=256, n_angles=180, learnable_geometry=True)
+optimizer = torch.optim.Adam(projector.parameters(), lr=0.5)
+
+loss = (projector.forward(projector.fbp(y)) - y).pow(2).mean()
+loss.backward()          # projector.pose.grad is [180, 2]
+optimizer.step()
+```
+
+`learnable_geometry=True` registers the pose, and the fan's distances, as
+`nn.Parameter`s, so an optimiser reaches them through `.parameters()`. Without it
+they are ordinary buffers: `requires_grad_(True)` on either still gives a one-off
+gradient, and `projector.set_pose(angles=..., detector_shift=...)` or
+`fan.set_distances(src_dist=...)` writes the geometry with no gradient at all. A
+table built as an expression in some other parameter can be assigned straight to
+`projector.pose` or `fan.distances`, which is how one scalar drives every view.
+Both are in the state dict, so a learnt geometry travels with its checkpoint; 0.3
+checkpoints, which saved `angles` alone, still load with `strict=True`.
+
+A constant detector shift is a centre-of-rotation error, a per-view one is
+in-plane motion, and the angle column on its own is the sampling pattern.
+`benchmark/calibrate_geometry.py` recovers a scanner's 3 px axis offset from the
+sinogram alone, with the phantom unknown, by descending
+`|| A_u fbp_u(y) - y ||^2` in the shift `u`:
+
+| Geometry | Recovered | Error | `backend="auto"` | `backend="torch"` |
+| --- | --- | --- | --- | --- |
+| parallel | 2.981 px | 0.019 px | 4.5 s | 8.5 s |
+| fan | 2.971 px | 0.029 px | 5.6 s | 12.1 s |
+
+256 px, 256 views, 80 Adam steps on an RTX 2080 Ti. Adding 5% noise to the
+sinogram moves the errors to 0.026 and 0.035 px. What is left is the objective's
+own bias rather than the optimiser's: swept over the shift, the parallel-beam loss
+has its minimum at 2.98 px at this size, and at 2.96 px at 128 px.
+
+With `backend="cuda"` or `"auto"`, `forward()` and `adjoint()` of a geometry that
+wants a gradient run on the CUDA kernels, with opt-in backward kernels that return
+the gradient of the view table (parallel) or ray table (fan) and let autograd
+carry it to the pose and the distances. They agree with a float64 reference to
+about 1e-5. On four images per batch:
+
+| Geometry | Size, views | Pose gradient of | PyTorch path | CUDA kernels |
+| --- | --- | --- | --- | --- |
+| parallel | 256, 256 | forward | 71.0 ms | 0.93 ms |
+| parallel | 512, 360 | forward | 401 ms | 4.62 ms |
+| parallel | 512, 360 | adjoint | out of memory | 4.52 ms |
+| fan | 256, 256 | forward | 108 ms | 4.06 ms |
+| fan | 512, 360 | forward | out of memory | 7.32 ms |
+
+The kernel path is first order: a second derivative through it raises, where the
+PyTorch path (any device, float64 too) differentiates the geometry to any order.
+`fbp()` and `backproject()` differentiate the geometry on the PyTorch path, and
+`approximate=True` does so through the exact PyTorch path, since its inexact pair
+would give a gradient that belongs to no operator. A shifted pose that wants no
+gradient, such as a scanner with a calibrated axis offset, runs the ordinary CUDA
+kernels, which read the shifts from their view table, keep their exact adjoint,
+and are bit for bit the 0.3.0 kernels when nothing is shifted.
+`backend="triton"` reads angles only, so a shifted pose falls back from it.
+
 ## API Snapshot
 
 - `ParallelBeam(..., backend="torch" | "cuda" | "triton" | "auto")`
 - `FanBeam(..., backend="torch" | "cuda" | "auto")`
+- `ParallelBeam(..., learnable_geometry=True)`, `FanBeam(..., learnable_geometry=True)`
+- `projector.pose`: `[n_angles, 2]` or `[n_angles, 3]`, angle then lateral shifts
+- `projector.set_pose(angles=..., detector_shift=..., source_shift=...)`
+- `projector.angles`, `projector.detector_shift`, `fan.source_shift`
+- `fan.distances`: `[src_dist, det_dist, det_width]`; `fan.set_distances(...)`
 - `projector.forward(image)`
 - `projector.backward(sinogram)`: exact discrete adjoint, for LPD/iterative methods
 - `projector.adjoint(sinogram)`: equivalent to `backward(sinogram)`

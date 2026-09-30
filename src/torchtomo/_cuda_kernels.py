@@ -82,12 +82,21 @@ def _flat_mask(mask: torch.Tensor | None) -> torch.Tensor | None:
     return None if mask is None else mask.reshape(-1).to(torch.float32).contiguous()
 
 
+def _variant(pose: torch.Tensor) -> str:
+    """ "" for an [A, 2] (cos, sin) table, "_shifted" for [A, 4] with the view shifts."""
+    return "_shifted" if pose.shape[1] == 4 else ""
+
+
 def parallel_forward(
-    image: torch.Tensor, trig: torch.Tensor, mask: torch.Tensor | None, pixel_size: float
+    image: torch.Tensor, pose: torch.Tensor, mask: torch.Tensor | None, pixel_size: float
 ) -> torch.Tensor:
-    """[B, 1, S, S] -> [B, 1, A, S]; the mask is applied to the image first."""
+    """[B, 1, S, S] -> [B, 1, A, S]; the mask is applied to the image first.
+
+    pose is [A, 2] float32 (cos, sin), or [A, 4] with the detector shift in pixels
+    third, which selects the kernels built for shifted views.
+    """
     batch, size = image.shape[0], image.shape[-1]
-    n_angles = trig.shape[0]
+    n_angles = pose.shape[0]
     flat = image.reshape(batch, size * size)
     mask = _flat_mask(mask)
     out = image.new_empty(batch, 1, n_angles, size)
@@ -100,8 +109,8 @@ def parallel_forward(
     library = _kernels()
     for start, count, width in _groups(batch, _FORWARD_GROUP):
         packed = _pack(flat, start, count, width, mask)
-        kernel = library.function(f"parallel_forward_c{width}", image.device)
-        kernel(grid, block, [packed, trig, out[start], size, n_angles, count, n_angles * size, pixel_size, r2])
+        kernel = library.function(f"parallel_forward{_variant(pose)}_c{width}", image.device)
+        kernel(grid, block, [packed, pose, out[start], size, n_angles, count, n_angles * size, pixel_size, r2])
     return out
 
 
@@ -110,7 +119,7 @@ def _gather_grid(size: int, rows: int = 1) -> tuple[int, int, int]:
 
 
 def parallel_adjoint(
-    sinogram: torch.Tensor, trig: torch.Tensor, mask: torch.Tensor | None, pixel_size: float
+    sinogram: torch.Tensor, pose: torch.Tensor, mask: torch.Tensor | None, pixel_size: float
 ) -> torch.Tensor:
     """[B, 1, A, S] -> [B, 1, S, S], the exact transpose of parallel_forward."""
     batch, _, n_angles, size = sinogram.shape
@@ -120,17 +129,17 @@ def parallel_adjoint(
     library = _kernels()
     for start, count, width in _groups(batch, _GATHER_GROUP):
         packed = _pack(flat, start, count, width)
-        kernel = library.function(f"parallel_adjoint_c{width}", sinogram.device)
+        kernel = library.function(f"parallel_adjoint{_variant(pose)}_c{width}", sinogram.device)
         kernel(
             _gather_grid(size),
             _GATHER_BLOCK,
-            [packed, trig, mask, out[start], size, n_angles, count, size * size, pixel_size],
+            [packed, pose, mask, out[start], size, n_angles, count, size * size, pixel_size],
         )
     return out
 
 
 def parallel_backproject(
-    sinogram: torch.Tensor, trig: torch.Tensor, coords: torch.Tensor, mask: torch.Tensor | None, scale: float
+    sinogram: torch.Tensor, pose: torch.Tensor, coords: torch.Tensor, mask: torch.Tensor | None, scale: float
 ) -> torch.Tensor:
     """FBP backprojection [B, 1, A, n_det] -> [B, 1, S, S], linear on the detector."""
     batch, _, n_angles, n_det = sinogram.shape
@@ -141,11 +150,11 @@ def parallel_backproject(
     library = _kernels()
     for start, count, width in _groups(batch, _GATHER_GROUP):
         packed = _pack(flat, start, count, width)
-        kernel = library.function(f"parallel_backproject_c{width}", sinogram.device)
+        kernel = library.function(f"parallel_backproject{_variant(pose)}_c{width}", sinogram.device)
         kernel(
             _gather_grid(size),
             _GATHER_BLOCK,
-            [packed, trig, coords, mask, out[start], size, n_angles, n_det, count, size * size, scale],
+            [packed, pose, coords, mask, out[start], size, n_angles, n_det, count, size * size, scale],
         )
     return out
 
@@ -225,7 +234,7 @@ def fan_adjoint(
 
 def fan_backproject(
     sinogram: torch.Tensor,
-    trig: torch.Tensor,
+    pose: torch.Tensor,
     coords: torch.Tensor,
     mask: torch.Tensor | None,
     src: float,
@@ -233,7 +242,11 @@ def fan_backproject(
     half_width: float,
     scale: float,
 ) -> torch.Tensor:
-    """Weighted FBP backprojection [B, 1, A, n_det] -> [B, 1, S, S]."""
+    """Weighted FBP backprojection [B, 1, A, n_det] -> [B, 1, S, S].
+
+    pose is [A, 2] float32 (cos, sin), or [A, 4] with the detector and source shift
+    after them in normalised coordinates.
+    """
     batch, _, n_angles, n_det = sinogram.shape
     size = coords.numel()
     flat = sinogram.reshape(batch, n_angles * n_det)
@@ -242,13 +255,13 @@ def fan_backproject(
     library = _kernels()
     for start, count, width in _groups(batch, _GATHER_GROUP):
         packed = _pack(flat, start, count, width)
-        kernel = library.function(f"fan_backproject_c{width}", sinogram.device)
+        kernel = library.function(f"fan_backproject{_variant(pose)}_c{width}", sinogram.device)
         kernel(
             _gather_grid(size),
             _GATHER_BLOCK,
             [
                 packed,
-                trig,
+                pose,
                 coords,
                 mask,
                 out[start],
@@ -264,6 +277,62 @@ def fan_backproject(
             ],
         )
     return out
+
+
+def parallel_pose_grad(
+    image: torch.Tensor, grad_sinogram: torch.Tensor, pose: torch.Tensor, mask: torch.Tensor | None, pixel_size: float
+) -> torch.Tensor:
+    """d<g, A x> / d(view table), [A, 4] for the shifted table (cos, sin, s, 0).
+
+    The last column stays zero. Summed over the batch.
+    """
+    batch, size = image.shape[0], image.shape[-1]
+    n_angles = pose.shape[0]
+    flat = image.reshape(batch, size * size)
+    grad_flat = grad_sinogram.reshape(batch, n_angles * size)
+    mask = _flat_mask(mask)
+    out = torch.zeros(n_angles, 4, device=image.device, dtype=torch.float32)
+    c = 0.5 * (size - 1)
+    r2 = (c + 2.0) ** 2 if mask is not None else 1e30
+    bins = _FORWARD_TILE * _FORWARD_WARPS
+    grid = (math.ceil(size / bins), n_angles, 1)
+    block = (32 * _FORWARD_WARPS, 1, 1)
+    library = _kernels()
+    for start, count, width in _groups(batch, _FORWARD_GROUP):
+        packed = _pack(flat, start, count, width, mask)
+        packed_grad = _pack(grad_flat, start, count, width)
+        kernel = library.function(f"parallel_pose_grad_c{width}", image.device)
+        kernel(grid, block, [packed, packed_grad, pose, out, size, pixel_size, r2])
+    return out
+
+
+def fan_ray_grad(
+    image: torch.Tensor,
+    grad_sinogram: torch.Tensor,
+    rays: torch.Tensor,
+    weights: torch.Tensor,
+    mask: torch.Tensor | None,
+    n_angles: int,
+    n_det: int,
+    n_samples: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """d<g, A x> / d(ray table) and / d(ray weights), [A * n_det, 4] and [A * n_det]."""
+    batch, size = image.shape[0], image.shape[-1]
+    flat = image.reshape(batch, size * size)
+    grad_flat = grad_sinogram.reshape(batch, n_angles * n_det)
+    mask = _flat_mask(mask)
+    out_rays = torch.zeros(n_angles * n_det, 4, device=image.device, dtype=torch.float32)
+    out_weights = torch.zeros(n_angles * n_det, device=image.device, dtype=torch.float32)
+    bins = _FORWARD_TILE * _FORWARD_WARPS
+    grid = (math.ceil(n_det / bins), n_angles, 1)
+    block = (32 * _FORWARD_WARPS, 1, 1)
+    library = _kernels()
+    for start, count, width in _groups(batch, _FORWARD_GROUP):
+        packed = _pack(flat, start, count, width, mask)
+        packed_grad = _pack(grad_flat, start, count, width)
+        kernel = library.function(f"fan_ray_grad_c{width}", image.device)
+        kernel(grid, block, [packed, packed_grad, rays, weights, out_rays, out_weights, size, n_det, n_samples])
+    return out_rays, out_weights
 
 
 # ---------------------------------------------------------------------------------
@@ -301,10 +370,10 @@ def _load_texture(texture: Texture2D, images: torch.Tensor, mask: torch.Tensor |
 
 
 def parallel_forward_texture(
-    image: torch.Tensor, trig: torch.Tensor, mask: torch.Tensor | None, pixel_size: float, cache: dict
+    image: torch.Tensor, pose: torch.Tensor, mask: torch.Tensor | None, pixel_size: float, cache: dict
 ) -> torch.Tensor:
     batch, size = image.shape[0], image.shape[-1]
-    n_angles = trig.shape[0]
+    n_angles = pose.shape[0]
     images = image.reshape(batch, size, size)
     mask = _flat_mask(mask)
     out = image.new_empty(batch, 1, n_angles, size)
@@ -316,8 +385,8 @@ def parallel_forward_texture(
     for slot, (start, count, width) in enumerate(_groups(batch, _TEXTURE_GROUP)):
         texture = _texture(cache, image.device, slot, size, width)
         _load_texture(texture, images[start : start + count], mask)
-        kernel = library.function(f"parallel_forward_texture_c{width}", image.device)
-        kernel(grid, block, [texture, trig, out[start], size, n_angles, count, n_angles * size, pixel_size, r2])
+        kernel = library.function(f"parallel_forward_texture{_variant(pose)}_c{width}", image.device)
+        kernel(grid, block, [texture, pose, out[start], size, n_angles, count, n_angles * size, pixel_size, r2])
     return out
 
 
@@ -360,7 +429,9 @@ def fan_adjoint_pixel(
     span: float,
     spacing: float,
     scale: float,
+    shifted: bool = False,
 ) -> torch.Tensor:
+    """Pixel-driven fan adjoint; `shifted` reads the views' per-view bin offset."""
     batch, _, n_angles, n_det = sinogram.shape
     flat = sinogram.reshape(batch, n_angles * n_det)
     mask = _flat_mask(mask)
@@ -368,7 +439,7 @@ def fan_adjoint_pixel(
     library = _kernels()
     for start, count, width in _groups(batch, _GATHER_GROUP):
         packed = _pack(flat, start, count, width)
-        kernel = library.function(f"fan_adjoint_pixel_c{width}", sinogram.device)
+        kernel = library.function(f"fan_adjoint_pixel{'_shifted' if shifted else ''}_c{width}", sinogram.device)
         kernel(
             _gather_grid(size),
             _GATHER_BLOCK,

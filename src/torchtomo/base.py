@@ -4,14 +4,19 @@ from abc import ABC, abstractmethod
 
 import torch
 import torch.nn as nn
+from torch.autograd.function import once_differentiable
 
 from ._cuda_kernels import cuda_kernels_available
 from ._nvrtc import runtime_available
 from ._sampling import grid_sample_input_backward_supported
 
 
-def _vjp_adjoint(projector: "BaseProjector", sinogram: torch.Tensor) -> torch.Tensor:
-    """A^T y by differentiating a throwaway forward. Fallback and test reference."""
+def _vjp_adjoint(projector: "BaseProjector", sinogram: torch.Tensor, create_graph: bool = False) -> torch.Tensor:
+    """A^T y by differentiating a throwaway forward. Fallback and test reference.
+
+    With create_graph the result stays attached to whatever the forward read, which
+    is how the adjoint carries a gradient back to the geometry.
+    """
     with torch.inference_mode(False), torch.enable_grad():
         image = torch.zeros(
             sinogram.shape[0],
@@ -23,7 +28,7 @@ def _vjp_adjoint(projector: "BaseProjector", sinogram: torch.Tensor) -> torch.Te
             requires_grad=True,
         )
         projection = projector.forward(image)
-        return torch.autograd.grad(projection, image, sinogram, create_graph=False)[0]
+        return torch.autograd.grad(projection, image, sinogram, create_graph=create_graph)[0]
 
 
 def _adjoint_image(projector: "BaseProjector", sinogram: torch.Tensor) -> torch.Tensor:
@@ -78,6 +83,54 @@ class _KernelAdjoint(torch.autograd.Function):
         return _KernelProject.apply(grad_image, ctx.projector), None
 
 
+class _KernelGeometryProject(torch.autograd.Function):
+    """A x on the CUDA kernels for a geometry that wants a gradient.
+
+    The kernel tables arrive as inputs, built from the pose inside the graph, and
+    the geometry-gradient kernels return theirs; autograd carries those the rest of
+    the way to the pose. First order only: the table gradients come from a kernel
+    with no derivative of its own, so a second derivative raises instead of quietly
+    missing the terms that pass through the geometry.
+    """
+
+    @staticmethod
+    def forward(ctx, image: torch.Tensor, projector: "BaseProjector", *tables: torch.Tensor) -> torch.Tensor:
+        ctx.projector = projector
+        ctx.save_for_backward(image, *tables)
+        return projector._kernel_forward(image, tables)
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_sinogram: torch.Tensor):
+        image, *tables = ctx.saved_tensors
+        projector = ctx.projector
+        grad_sinogram = grad_sinogram.contiguous()
+        grad_image = projector._kernel_adjoint(grad_sinogram, tables) if ctx.needs_input_grad[0] else None
+        grad_tables = projector._kernel_table_grads(image, grad_sinogram, tables)
+        return (grad_image, None, *grad_tables)
+
+
+class _KernelGeometryAdjoint(torch.autograd.Function):
+    """A^T y on the CUDA kernels for a geometry that wants a gradient; see above."""
+
+    @staticmethod
+    def forward(ctx, sinogram: torch.Tensor, projector: "BaseProjector", *tables: torch.Tensor) -> torch.Tensor:
+        ctx.projector = projector
+        ctx.save_for_backward(sinogram, *tables)
+        return projector._kernel_adjoint(sinogram, tables)
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_image: torch.Tensor):
+        sinogram, *tables = ctx.saved_tensors
+        projector = ctx.projector
+        grad_image = grad_image.contiguous()
+        grad_sinogram = projector._kernel_forward(grad_image, tables) if ctx.needs_input_grad[0] else None
+        # <u, A^T y> = <A u, y>: the forward's table gradient with the roles swapped.
+        grad_tables = projector._kernel_table_grads(grad_image, sinogram, tables)
+        return (grad_sinogram, None, *grad_tables)
+
+
 class _KernelBackproject(torch.autograd.Function):
     """FBP backprojection on the CUDA kernels; the VJP differentiates the PyTorch path."""
 
@@ -123,6 +176,10 @@ class BaseProjector(nn.Module, ABC):
     All operations are differentiable with respect to their tensor inputs.
     """
 
+    # Per-view geometry, one row per view: column 0 is the angle, the rest are
+    # lateral offsets in pixels that are zero unless something sets or learns them.
+    _POSE_COLUMNS: tuple[str, ...] = ("angle", "detector_shift")
+
     def __init__(
         self,
         img_size: int,
@@ -130,6 +187,7 @@ class BaseProjector(nn.Module, ABC):
         n_det: int,
         angle_range: tuple[float, float] = (0, torch.pi),
         angles: torch.Tensor | None = None,
+        learnable_geometry: bool = False,
     ):
         super().__init__()
         self.backend = "torch"
@@ -138,6 +196,7 @@ class BaseProjector(nn.Module, ABC):
         self.img_size = img_size
         self.n_det = n_det
         self.angle_range = angle_range
+        self.learnable_geometry = learnable_geometry
         if angles is not None:
             source = torch.as_tensor(angles, dtype=torch.float64).reshape(-1).detach().cpu().contiguous()
             if source.numel() < 1:
@@ -150,35 +209,182 @@ class BaseProjector(nn.Module, ABC):
             self.n_angles = n_angles
             self._explicit_angles = None
             self.angle_step = (angle_range[1] - angle_range[0]) / n_angles
-        self._set_angle_buffer(torch.device("cpu"), torch.float32)
+        self._set_pose(torch.device("cpu"), torch.float32)
 
-    def _set_angle_buffer(self, device: torch.device, dtype: torch.dtype) -> None:
-        """Rebuild angles in the requested dtype from the original range or list.
+    def _angle_samples(self, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+        """Angles in the requested dtype from the original range or list.
 
         The default list is an open interval: n samples, spacing
         (end - start) / n, so both endpoints of a half-turn are not included.
         An explicit list is stored in float64 and cast on `.to()`.
         """
         if self._explicit_angles is not None:
-            angles = self._explicit_angles.to(device=device, dtype=dtype)
+            return self._explicit_angles.to(device=device, dtype=dtype)
+        start, end = float(self.angle_range[0]), float(self.angle_range[1])
+        step = (end - start) / self.n_angles
+        return torch.arange(self.n_angles, dtype=dtype, device=device) * step + start
+
+    def _set_pose(self, device: torch.device, dtype: torch.dtype, offsets: torch.Tensor | None = None) -> None:
+        """Register the pose table, angles in column 0 and offsets after it."""
+        pose = torch.zeros(self.n_angles, len(self._POSE_COLUMNS), device=device, dtype=dtype)
+        pose[:, 0] = self._angle_samples(device, dtype)
+        if offsets is not None:
+            pose[:, 1:] = offsets.to(device=device, dtype=dtype)
+        # Whether the offset columns hold anything, so a geometry nobody has shifted
+        # keeps the exact arithmetic, and the exact cost, it had before they existed.
+        self._pose_has_offsets = bool(offsets is not None and bool(offsets.any()))
+        if self.learnable_geometry:
+            self.register_parameter("pose", nn.Parameter(pose))
         else:
-            start, end = float(self.angle_range[0]), float(self.angle_range[1])
-            step = (end - start) / self.n_angles
-            angles = torch.arange(self.n_angles, dtype=dtype, device=device) * step + start
-        self.register_buffer("angles", angles)
+            self.register_buffer("pose", pose)
+
+    def set_pose(
+        self,
+        angles: torch.Tensor | None = None,
+        detector_shift: torch.Tensor | float | None = None,
+        source_shift: torch.Tensor | float | None = None,
+    ) -> None:
+        """Write the per-view geometry: angles in radians, shifts in pixels.
+
+        Use this rather than assigning into `pose`, which cannot tell the projector
+        that its offsets stopped being zero or that a cached table is now stale.
+        """
+        columns = {"angle": angles, "detector_shift": detector_shift, "source_shift": source_shift}
+        with torch.no_grad():
+            for name, value in columns.items():
+                if value is None:
+                    continue
+                if name not in self._POSE_COLUMNS:
+                    raise ValueError(f"{type(self).__name__} has no pose column {name!r}")
+                column = self._POSE_COLUMNS.index(name)
+                self.pose[:, column] = torch.as_tensor(value, device=self.pose.device, dtype=self.pose.dtype)
+        self._pose_has_offsets = bool(self.pose[:, 1:].any())
+        self._geometry_changed()
+
+    def __setattr__(self, name: str, value) -> None:
+        super().__setattr__(name, value)
+        if name == "pose" and isinstance(value, torch.Tensor):
+            # Replacing the table wholesale is the other way to move the geometry,
+            # and it is how a pose built as an expression in some other parameter
+            # arrives. It has the same consequences as set_pose.
+            # A pose that can move is never on the plain path anyway, so do not
+            # stop the device to ask whether its offsets are zero at this instant.
+            self._pose_has_offsets = True if value.requires_grad else bool(value[:, 1:].any())
+            self._geometry_changed()
+
+    def _geometry_changed(self) -> None:
+        self._kernel_cache = {}
+        self._invalidate_geometry()
+
+    def _invalidate_geometry(self) -> None:
+        """Drop anything precomputed from the geometry; subclasses extend this."""
+
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        # 0.3 saved the angles on their own. They become the pose's first column, with
+        # every offset zero, so its checkpoints still load with strict=True.
+        angles_key, pose_key = prefix + "angles", prefix + "pose"
+        if angles_key in state_dict and pose_key not in state_dict:
+            angles = state_dict.pop(angles_key).reshape(-1)
+            pose = angles.new_zeros(angles.numel(), len(self._POSE_COLUMNS))
+            pose[:, 0] = angles
+            state_dict[pose_key] = pose
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+        # Loading copies into the table in place, which no flag or cache can see.
+        self._pose_has_offsets = bool(self.pose[:, 1:].any())
+        self._geometry_changed()
+
+    @property
+    def angles(self) -> torch.Tensor:
+        """Projection angles in radians, column 0 of the pose table."""
+        return self.pose[:, 0]
+
+    @property
+    def detector_shift(self) -> torch.Tensor:
+        """Per-view lateral detector offset in pixels, column 1 of the pose table."""
+        return self.pose[:, 1]
+
+    @property
+    def shift_scale(self) -> float:
+        """One pixel of offset in the [-1, 1] coordinates the grids work in.
+
+        The image lattice is linspace(-1, 1, img_size), so a pixel is its spacing,
+        which for parallel beam is also exactly one detector bin. Fan beam measures
+        its distances against a slightly different pixel and overrides this.
+        """
+        return 2.0 / max(self.img_size - 1, 1)
+
+    def _geometry_tensors(self) -> tuple[torch.Tensor, ...]:
+        """Every tensor the geometry is made of; fan beam adds its distances."""
+        return (self.pose,)
+
+    def _geometry_requires_grad(self) -> bool:
+        """True when this call has to build the geometry inside the autograd graph."""
+        return torch.is_grad_enabled() and any(t.requires_grad for t in self._geometry_tensors())
+
+    def _geometry_is_mutable(self) -> bool:
+        """True when the geometry can move, so nothing derived from it may be cached.
+
+        An optimiser step writes into the pose in place and under no_grad, which no
+        cache can see. Anything a moving geometry feeds is therefore rebuilt every
+        call, including under no_grad, where the gradient itself is not wanted but
+        the updated geometry still is.
+        """
+        return self.learnable_geometry or any(t.requires_grad for t in self._geometry_tensors())
+
+    def _pose_is_plain(self) -> bool:
+        """True for a fixed geometry with no offsets: the arithmetic that predates them.
+
+        `_pose_has_offsets` is a flag, and a flag cannot see an in-place write, so a
+        geometry that can move never takes this path even when its offsets read as
+        zero. That is what keeps a learnt shift from being silently dropped under
+        no_grad.
+        """
+        return not self._pose_has_offsets and not self._geometry_is_mutable()
 
     def _apply(self, fn, *args, **kwargs):
+        # Angles still exactly as built are restored from the float64 master after
+        # the cast, so .double() recovers the precision a float32 table lost. Angles
+        # something has moved, set_pose or an optimiser step, are kept as they are.
+        # Written in place, because a learnable pose is an nn.Parameter an
+        # optimiser may already be holding.
+        as_built = torch.equal(self.pose[:, 0].detach(), self._angle_samples(self.pose.device, self.pose.dtype))
         result = super()._apply(fn, *args, **kwargs)
-        self._set_angle_buffer(self.angles.device, self.angles.dtype)
+        if as_built:
+            with torch.no_grad():
+                self.pose[:, 0] = self._angle_samples(self.pose.device, self.pose.dtype)
         self._kernel_cache = {}
         return result
 
     def _use_kernels(self, tensor: torch.Tensor) -> bool:
-        """backend='cuda' on a float32 CUDA tensor with NVRTC available; else the PyTorch path."""
+        """backend='cuda' on a float32 CUDA tensor with NVRTC available; else the PyTorch path.
+
+        A shifted pose stays on the kernels, which read the shifts from their view
+        table. A geometry that wants a gradient does not: forward() and adjoint()
+        then take _use_geometry_kernels, and everything else the PyTorch path.
+        """
+        if self._geometry_requires_grad():
+            return False
         return self.backend == "cuda" and cuda_kernels_available(tensor.device, tensor.dtype)
+
+    def _use_geometry_kernels(self, tensor: torch.Tensor) -> bool:
+        """forward() or adjoint() of a geometry that wants a gradient, on the CUDA kernels.
+
+        The exact pair only: approximate=True is not the transpose of itself, so the
+        gradient it would give belongs to no operator, and it takes the exact PyTorch
+        path instead.
+        """
+        return (
+            self._geometry_requires_grad()
+            and not getattr(self, "approximate", False)
+            and self.backend == "cuda"
+            and cuda_kernels_available(tensor.device, tensor.dtype)
+        )
 
     def _kernel_cached(self, name: str, device: torch.device, build):
         """Build a kernel table once per device, as ordinary tensors even under inference_mode."""
+        if self._geometry_is_mutable():
+            with torch.inference_mode(False), torch.no_grad():
+                return build(device)
         key = (name, device)
         value = self._kernel_cache.get(key)
         if value is None:
@@ -187,14 +393,33 @@ class BaseProjector(nn.Module, ABC):
             self._kernel_cache[key] = value
         return value
 
-    def _kernel_trig(self, device: torch.device) -> torch.Tensor:
-        """[n_angles, 2] float32 (cos, sin), computed in float64 from the angle buffer."""
+    @property
+    def _kernel_shift_unit(self) -> float:
+        """One pixel of pose offset in the kernels' length unit: lattice steps here."""
+        return 1.0
+
+    def _kernel_pose(self, device: torch.device) -> torch.Tensor:
+        """The kernels' view table in float32, built in float64 from the pose.
+
+        [n_angles, 2] of (cos, sin) for a plain pose, which runs the kernels exactly
+        as they were before shifts existed. Otherwise [n_angles, 4] with the detector
+        and source shift after them, in the kernels' own length unit and zero for a
+        column this geometry does not have; the width picks the shifted kernels.
+        """
 
         def build(device):
-            angles = self.angles.detach().to(device=device, dtype=torch.float64)
-            return torch.stack((torch.cos(angles), torch.sin(angles)), dim=-1).to(torch.float32).contiguous()
+            pose = self.pose.detach().to(device=device, dtype=torch.float64)
+            return self._view_table(pose, 2 if self._pose_is_plain() else 4)
 
-        return self._kernel_cached("trig", device, build)
+        return self._kernel_cached("pose", device, build)
+
+    def _view_table(self, pose: torch.Tensor, width: int) -> torch.Tensor:
+        """The view table from a float64 pose, differentiable in it; see _kernel_pose."""
+        columns = [torch.cos(pose[:, 0]), torch.sin(pose[:, 0])]
+        if width == 4:
+            columns += list((pose[:, 1:] * self._kernel_shift_unit).unbind(1))
+            columns += [torch.zeros_like(columns[0])] * (4 - len(columns))
+        return torch.stack(columns, dim=1).to(torch.float32).contiguous()
 
     def _kernel_coords(self, device: torch.device) -> torch.Tensor:
         """Pixel centres in normalised coordinates, as the eager grids use them."""
@@ -239,10 +464,12 @@ class BaseProjector(nn.Module, ABC):
         roundoff.
 
         Differentiable with respect to sinogram, with backward gradient A g,
-        so this operator can be used inside Learned Primal-Dual networks.
-        Geometry must remain fixed between evaluation and backpropagation;
-        gradients with respect to geometry are not supported. Projector buffers
-        must have the same device and dtype as sinogram, as for forward().
+        so this operator can be used inside Learned Primal-Dual networks. It is
+        differentiable with respect to the pose table as well, at the cost of one
+        throwaway forward: the exact adjoint hides the geometry from autograd by
+        construction, so a pose that wants a gradient is differentiated through a
+        forward instead. Projector buffers must have the same device and dtype as
+        sinogram, as for forward().
 
         Parallel beam and fan beam on CPU and CUDA call grid_sample's input
         backward kernel directly. MPS and older PyTorch builds fall back to a
@@ -258,6 +485,14 @@ class BaseProjector(nn.Module, ABC):
         """
         if self._use_kernels(sinogram):
             return _KernelAdjoint.apply(sinogram, self)
+        if self._use_geometry_kernels(sinogram):
+            tables = self._kernel_tables(sinogram.device, differentiable=True)
+            return _KernelGeometryAdjoint.apply(sinogram, self, *tables)
+        if self._geometry_requires_grad():
+            # _DiscreteAdjoint hides the geometry from autograd by construction: its
+            # backward is A, not d(A^T y)/d(geometry). Differentiating a throwaway
+            # forward keeps both gradients, at the cost of that extra forward.
+            return _vjp_adjoint(self, sinogram, create_graph=True)
         return _DiscreteAdjoint.apply(sinogram, self)
 
     def backward(self, sinogram: torch.Tensor) -> torch.Tensor:

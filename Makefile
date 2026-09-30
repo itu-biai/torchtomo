@@ -45,6 +45,10 @@ benchmark-speed: ## Print the backend speed table
 benchmark-adjoint: ## Inner-product test of forward() against adjoint()
 	PYTHONPATH=src $(PYTHON) benchmark/benchmark_adjoint.py --pairs 500 --dtype float64
 
+.PHONY: benchmark-calibrate
+benchmark-calibrate: ## Recover a 3 px axis offset by differentiating the geometry
+	PYTHONPATH=src $(PYTHON) benchmark/calibrate_geometry.py --geometry both
+
 .PHONY: check
 check: format lint test ## Run format, lint, and test
 
