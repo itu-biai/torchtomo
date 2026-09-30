@@ -10,8 +10,8 @@ objective is the reconstruction's own data consistency,
     L(u) = || A_u fbp_u(y) - y ||^2 / N,
 
 with the detector shift u as the single free parameter. Nothing here knows the
-phantom: the gradient dL/du comes from the projector itself, which is what no
-other CT library offers.
+phantom: the gradient dL/du comes from the projector itself, through the
+forward projection and the FBP alike.
 
 The pose table is assembled as an expression in u, one scalar driving every view,
 so the gradient arrives at u through ordinary autograd. A per-view shift, a

@@ -49,6 +49,10 @@ benchmark-adjoint: ## Inner-product test of forward() against adjoint()
 benchmark-calibrate: ## Recover a 3 px axis offset by differentiating the geometry
 	PYTHONPATH=src $(PYTHON) benchmark/calibrate_geometry.py --geometry both
 
+.PHONY: benchmark-angles
+benchmark-angles: ## Learn which 12 views to measure through the pose table's angle column
+	PYTHONPATH=src $(PYTHON) benchmark/angles/learn_angles.py
+
 .PHONY: check
 check: format lint test ## Run format, lint, and test
 
