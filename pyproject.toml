@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torchtomo"
-version = "0.3.0"
+version = "0.4.0"
 description = "Differentiable CT Reconstruction in Pure PyTorch"
 readme = "README.md"
 license = "CC-BY-NC-4.0"
