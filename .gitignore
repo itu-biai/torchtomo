@@ -40,6 +40,7 @@ Thumbs.db
 *.png
 *.jpg
 *.jpeg
+!docs/images/reconstruction.png
 status.md
 
 benchmark/*/results/
