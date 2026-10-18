@@ -35,6 +35,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+tcia = [
+    "pydicom>=3.0",
+]
 test = [
     "pytest",
     "pytest-cov",

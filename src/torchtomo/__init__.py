@@ -18,6 +18,7 @@ Example:
     >>> recon = projector.fbp(sinogram)
 """
 
+from .conebeam import ConeBeam
 from .fanbeam import FanBeam
 from .filters import apply_filter, get_filter
 from .parallel import ParallelBeam
@@ -27,6 +28,7 @@ __version__ = "0.4.0"
 __all__ = [
     "ParallelBeam",
     "FanBeam",
+    "ConeBeam",
     "apply_filter",
     "get_filter",
     "shepp_logan",
