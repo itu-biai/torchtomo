@@ -13,7 +13,7 @@ NVIDIA CUDA, and Apple Silicon (MPS)**, with gradients through images, sinograms
 and scan geometry. The default backend uses PyTorch operations; optional CUDA
 kernels compile at first use with no separate build step.
 
-[Quick start](#quick-start) · [Operators](#operators-and-tensor-shapes) ·
+[Quick start](#quick-start) · [Experimental 3D](#experimental-3d-cone-beam) · [Operators](#operators-and-tensor-shapes) ·
 [Geometry gradients](#learn-the-scan-geometry) · [Backends](#choose-a-backend) ·
 [Benchmarks](#benchmarks-and-examples) · [Implementation notes](docs/advanced.md)
 
@@ -29,6 +29,7 @@ Generated with TorchTomo’s CPU backend.*
 - **Use a matched operator pair:** `adjoint()` is the transpose of the implemented `forward()`, up to floating-point roundoff in exact mode.
 - **Optimize the scanner geometry:** learn view angles, detector shifts, and fan-beam source shifts and distances as tensors.
 - **Accelerate on CUDA:** optional runtime-compiled kernels for forward projection, adjoint, FBP, and first-order geometry gradients.
+- **Explore 3D helical CT:** experimental cone beam forward/adjoint operators and an optional CT-PD reader.
 - **Experiment immediately:** built-in phantoms and six FBP filters: `ramp`, `shepp-logan`, `cosine`, `hamming`, `hann`, and `none`.
 
 ## Installation
@@ -82,9 +83,55 @@ and source-to-isocentre and isocentre-to-detector distances of 512 pixels.
 Set `n_det`, `src_dist`, `det_dist`, and `det_spacing` or `det_width` for a
 specific acquisition.
 
+## Experimental 3D Cone Beam
+
+`ConeBeam` integrates a 3D volume along explicit source-to-detector segments and
+provides their matched discrete adjoint. Source positions have shape
+`[views, 3]`; detector element positions have shape `[views, rows, columns, 3]`.
+Both use `(x, y, z)` coordinates. The volume shape and voxel spacing use
+`(z, y, x)` order. Distances use the same physical unit throughout, and volume
+values are attenuation coefficients in its inverse.
+
+```python
+from torchtomo import ConeBeam
+
+projector = ConeBeam(
+    volume_shape=(32, 128, 128),
+    source_positions=sources,
+    detector_positions=detector_elements,
+    voxel_spacing=(4.0, 3.90625, 3.90625),
+    volume_center=(0.0, 0.0, scan_center_z),
+    n_samples=192,
+    ray_chunk=2048,
+)
+projections = projector(volume)          # [B, 1, views, rows, columns]
+adjoint_volume = projector.adjoint(projections)  # [B, 1, Z, Y, X]
+```
+
+Provide `sources`, `detector_elements`, and `scan_center_z` from the acquisition
+geometry. The same interface handles circular and helical trajectories, flat and
+curved detectors, and per-view source offsets. Gradients reach both the volume
+and source/detector coordinate tensors. `backward()` aliases `adjoint()`.
+
+This is a PyTorch reference implementation with chunked trilinear integration on
+CPU and CUDA. It has no fused CUDA backend, FDK, or analytical backprojection.
+It generates sample grids as needed and stores the explicit detector coordinates;
+large scans should be split into view subsets. The
+autograd path retains interpolation stencils during training, so its memory use
+can exceed the temporary storage needed for evaluation. The
+[cone beam examples](benchmark/README.md) include a synthetic check and a TCIA
+helical reconstruction pilot. The optional CT-PD reader requires
+`pip install 'torchtomo[tcia]'`; it currently accepts uncompressed unsigned
+16-bit, single-spectrum, cylindrical-detector data. Measured-data reconstruction
+remains experimental.
+
+`torchtomo.ctpd.read_projection(path)` returns a decoded view and its detector
+line integrals. The view's `positions(rows, columns)` method generates physical
+source and detector coordinates in the CT-PD manual's Cartesian frame.
+
 ## Operators and tensor shapes
 
-Images are square, single-channel tensors; the leading dimension batches independent slices.
+The 2D projectors use square, single-channel images; the leading dimension batches independent slices.
 
 | Tensor | Shape |
 | --- | --- |
@@ -142,7 +189,7 @@ is its equivalent operator method; `loss.backward()` is PyTorch’s autograd cal
 
 ## Learn the scan geometry
 
-Each view has a pose tensor. With `learnable_geometry=True`, it becomes an
+Each view of a 2D projector has a pose tensor. With `learnable_geometry=True`, it becomes an
 `nn.Parameter` that an optimizer can update. Fan beam also registers its
 `distances` tensor as a parameter.
 
@@ -218,7 +265,7 @@ These are measurements on one setup. Find the configurations, raw JSON,
 reconstruction figures, and comparisons with LEAP, torch-radon, and ASTRA in
 [torchtomo-benchmark’s 0.4.0 results](https://github.com/itu-biai/torchtomo-benchmark/blob/main/libraries/results/0.4.0/README.md).
 
-The library’s own experiments need only its dependencies:
+The core operator experiments use the library’s own dependencies:
 
 ```bash
 make benchmark-speed      # Available devices and backends
