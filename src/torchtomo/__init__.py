@@ -19,6 +19,7 @@ Example:
 """
 
 from .conebeam import ConeBeam
+from .dbt import BreastTomosynthesis
 from .fanbeam import FanBeam
 from .filters import apply_filter, get_filter
 from .parallel import ParallelBeam
@@ -29,6 +30,7 @@ __all__ = [
     "ParallelBeam",
     "FanBeam",
     "ConeBeam",
+    "BreastTomosynthesis",
     "apply_filter",
     "get_filter",
     "shepp_logan",

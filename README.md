@@ -129,6 +129,45 @@ remains experimental.
 line integrals. The view's `positions(rows, columns)` method generates physical
 source and detector coordinates in the CT-PD manual's Cartesian frame.
 
+### Digital breast tomosynthesis
+
+`BreastTomosynthesis` builds a `ConeBeam` for a limited-angle arc: the source
+moves on a circle about an axis between it and a stationary flat detector. Angle
+0 puts the source above `(0, source_y)`, and positive angles move it toward `+x`,
+the direction of increasing detector rows. `angular_range` is the angle from the
+first view to the last, both included.
+
+```python
+import math
+
+from torchtomo import BreastTomosynthesis
+
+projector = BreastTomosynthesis(
+    volume_shape=(57, 336, 408),     # (Z, Y, X)
+    n_angles=25,
+    angular_range=math.radians(50),
+    detector_shape=(752, 384),       # (rows along X, columns along Y)
+    pixel_size=0.34,
+    source_to_detector=650.0,
+    source_to_axis=600.0,
+    source_y=-65.28,                 # above the chest-wall edge of the detector
+    voxel_spacing=(1.0, 0.34, 0.34),
+    volume_center=(x_center, y_center, z_center),
+    n_samples=192,
+)
+```
+
+`torchtomo.victre` holds the published geometry of the
+[TCIA VICTRE](https://www.cancerimagingarchive.net/collection/victre/) trial and
+the projection conversion of the BIAI Lab DBT 2026v1 dataset.
+`victre_projector(density, bin_factor=4)` returns the projector on that
+dataset's grid, `read_projections(folder)` reads the 25 stored views, and
+`convert_projections(views)` returns line integrals, a valid-ray mask, and the
+per-view air levels. The readers need `pip install 'torchtomo[tcia]'`. Like
+`ConeBeam`, this is an experimental PyTorch reference without a fused kernel or
+an analytical FBP; [`benchmark/dbt`](benchmark/README.md#breast-tomosynthesis)
+reconstructs one VICTRE phantom with it.
+
 ## Operators and tensor shapes
 
 The 2D projectors use square, single-channel images; the leading dimension batches independent slices.
