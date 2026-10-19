@@ -1,7 +1,7 @@
 # Benchmarks
 
 Speed and self-consistency checks of torchtomo itself use the library's own
-dependencies. The measured CT-PD pilot additionally uses the optional DICOM
+dependencies. The measured CT-PD and VICTRE pilots additionally use the optional DICOM
 reader and matplotlib. These scripts are separate from the installed library.
 
 | File | What it does |
@@ -11,6 +11,7 @@ reader and matplotlib. These scripts are separate from the installed library.
 | `calibrate_geometry.py` | recovers a scanner's axis offset by differentiating the geometry |
 | `angles/learn_angles.py` | learns which views to measure by differentiating the angle column |
 | `conebeam/check_feasibility.py` | standalone synthetic 3D helical reference, with a cylindrical detector, matched adjoint, geometry gradients, and CGLS |
+| `dbt/prepare_victre.py`, `dbt/reconstruct_victre.py` | one TCIA VICTRE breast tomosynthesis phantom: line integrals, FBP, OS-SART, held-out views, and wrong-geometry controls |
 
 ```bash
 make benchmark-speed      # the backend speed table
@@ -84,6 +85,66 @@ Data come from the
 [LDCT-and-Projection-data collection](https://www.cancerimagingarchive.net/collection/ldct-and-projection-data/).
 Its documentation requests acknowledgement of NIBIB grants EB017095 and
 EB017185, Cynthia McCollough, PI.
+
+## Breast tomosynthesis
+
+`dbt/prepare_victre.py` downloads one phantom of the
+[TCIA VICTRE](https://www.cancerimagingarchive.net/collection/victre/) trial,
+its 25 projections and VICTRE's own reconstruction, and converts the projections
+with `torchtomo.victre`, the BIAI Lab DBT 2026v1 conversion: pedestal
+subtraction, a per-view air level from a ring around the breast, binning before
+the log, and masked collimator edges. `dbt/reconstruct_victre.py` then builds
+`victre_projector` on that dataset's grid and runs
+
+- FBP: cosine weighting, a Hann-windowed ramp along tube travel, and the matched
+  transpose, compared with VICTRE's FBP by Pearson correlation inside the breast;
+- OS-SART with the dataset's ground-truth recipe (5 subsets, 10 iterations,
+  nonnegative, 8 extra slices above and below), fitted to the 13 even views and
+  scored on the 12 odd ones;
+- both again with the source above the detector centre instead of the chest-wall
+  edge, and with the view order reversed.
+
+Both scripts need the `tcia` extra; the figure needs matplotlib.
+
+```bash
+python benchmark/dbt/prepare_victre.py --output benchmark/dbt/results/victre
+python benchmark/dbt/reconstruct_victre.py \
+    --input benchmark/dbt/results/victre/input_bin8.npz \
+    --output benchmark/dbt/results/victre/bin8
+```
+
+The 2026-10-19 run used phantom 694607065 (scattered, 57 slices, in the
+DBT 2026v1 training split) on a Colab T4 with PyTorch 2.11.0. Bin 8 is a
+376 x 192 detector at 0.68 mm and a 57 x 168 x 204 volume; bin 4 is the
+dataset's 752 x 384 detector at 0.34 mm and 57 x 336 x 408 volume.
+
+| Bins | Geometry | FBP correlation | OS-SART correlation | Training residual | Held-out residual |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 8 | published | 0.886 | 0.448 | 3.99% | 3.58% |
+| 8 | source over detector centre | 0.522 | 0.149 | 4.09% | 3.63% |
+| 8 | reversed view order | -0.510 | -0.304 | 49.1% | 47.3% |
+| 4 | published | 0.884 | 0.435 | 3.98% | 3.65% |
+| 4 | source over detector centre | 0.483 | 0.139 | 4.07% | 3.69% |
+| 4 | reversed view order | -0.382 | -0.283 | 48.8% | 47.0% |
+
+At bin 4, FBP took 36 s and OS-SART 400 s, with 4.2 GiB peak PyTorch allocation;
+at bin 8, 4.5 s and 51 s. The published geometry agrees with VICTRE's FBP better
+than the lab's LEAP FBP did on three scattered phantoms (0.866) and less well
+than its pyDBT FBP (0.920), whose placement was tuned on the reference; those
+used their own mask and 0.34 mm binning. The OS-SART breast median is 0.035
+mm^-1.
+
+Correlations compare against another FBP on an arbitrary scale, so SART scores
+lower even though its attenuation is physical. The held-out residual rejects the
+reversed views clearly but separates the source position by at most 0.05
+percentage points; the correlation with VICTRE's reconstruction is what pins the
+source above the chest wall. This is one phantom with simulated physics and a
+scalar flat field per view.
+
+Please cite Badano et al., "Evaluation of Digital Breast Tomosynthesis as
+Replacement of Full-Field Digital Mammography Using an In Silico Imaging Trial",
+JAMA Network Open 2018, and the TCIA VICTRE collection,
+DOI [10.7937/TCIA.2019.ho23nxaw](https://doi.org/10.7937/TCIA.2019.ho23nxaw).
 
 `calibrate_geometry.py` knows the sinogram and nothing else: no phantom, no true
 shift. It descends the reconstruction's own data consistency,
