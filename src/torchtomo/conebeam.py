@@ -74,11 +74,13 @@ class ConeBeam(nn.Module):
         if tensor.dtype != self.source_positions.dtype or tensor.device != self.source_positions.device:
             raise ValueError("input and projector geometry must share a device and dtype")
 
-    def _stencil(self, start: int, end: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def _stencil(
+        self, start: int, end: int, sources: torch.Tensor, detectors: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         panel_size = self.projection_shape[1] * self.projection_shape[2]
-        ray_ids = torch.arange(start, end, device=self.source_positions.device)
-        origins = self.source_positions[ray_ids // panel_size]
-        directions = self.detector_positions.reshape(-1, 3)[start:end] - origins
+        ray_ids = torch.arange(start, end, device=sources.device)
+        origins = sources[ray_ids // panel_size]
+        directions = detectors.reshape(-1, 3)[start:end] - origins
         ray_length = directions.norm(dim=-1)
         directions = directions / ray_length.clamp_min(torch.finfo(directions.dtype).tiny)[:, None]
         origins = origins - self.volume_center
@@ -114,26 +116,32 @@ class ConeBeam(nn.Module):
 
     def forward(self, volume: torch.Tensor) -> torch.Tensor:
         """Integrate trilinearly interpolated attenuation along each source-detector segment."""
+        return self._project(volume, self.source_positions, self.detector_positions)
+
+    def _project(self, volume: torch.Tensor, sources: torch.Tensor, detectors: torch.Tensor) -> torch.Tensor:
         self._check_input(volume, self.volume_shape)
         batch = volume.shape[0]
         flat_volume = volume.reshape(batch, -1)
-        ray_count = self.detector_positions.numel() // 3
+        ray_count = detectors.numel() // 3
         chunks = []
         for start in range(0, ray_count, self.ray_chunk):
-            indices, weights = self._stencil(start, min(start + self.ray_chunk, ray_count))
+            indices, weights = self._stencil(start, min(start + self.ray_chunk, ray_count), sources, detectors)
             values = flat_volume[:, indices.flatten()].reshape(batch, *indices.shape)
             chunks.append((values * weights).sum(dim=(-1, -2)))
         return torch.cat(chunks, dim=-1).reshape(batch, 1, *self.projection_shape)
 
     def adjoint(self, projections: torch.Tensor) -> torch.Tensor:
         """Apply the exact discrete transpose, with no angular or reconstruction weighting."""
+        return self._backproject(projections, self.source_positions, self.detector_positions)
+
+    def _backproject(self, projections: torch.Tensor, sources: torch.Tensor, detectors: torch.Tensor) -> torch.Tensor:
         self._check_input(projections, self.projection_shape)
         batch = projections.shape[0]
         flat_projections = projections.reshape(batch, -1)
         image = projections.new_zeros(batch, self.volume_shape[0] * self.volume_shape[1] * self.volume_shape[2])
         for start in range(0, flat_projections.shape[1], self.ray_chunk):
             end = min(start + self.ray_chunk, flat_projections.shape[1])
-            indices, weights = self._stencil(start, end)
+            indices, weights = self._stencil(start, end, sources, detectors)
             values = flat_projections[:, start:end, None, None] * weights
             image = image.scatter_add(1, indices.flatten()[None, :].expand(batch, -1), values.reshape(batch, -1))
         return image.reshape(batch, 1, *self.volume_shape)
