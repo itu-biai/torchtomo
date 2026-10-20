@@ -19,6 +19,7 @@ from torchtomo.victre import N_VIEWS, SOURCE_TO_DETECTOR_MM, victre_projector
 
 BINS = 16
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+BACKEND = "auto"
 
 
 def load(path: Path):
@@ -44,6 +45,7 @@ def projector(margin=4, **overrides):
         depth_margin=margin,
         n_samples=math.ceil(1.3 * depth / (0.085 * BINS)),
         ray_chunk=32768,
+        backend=BACKEND,
         device=DEVICE,
         **overrides,
     )
@@ -149,8 +151,8 @@ def calibrate(name, start, learn, measured, valid, reference, mask, outer, inner
 
 
 def main(args):
-    global BINS
-    BINS = args.bins
+    global BINS, BACKEND
+    BINS, BACKEND = args.bins, args.backend
     measured, valid, reference = load(args.input)
     published = projector(margin=0)
     with torch.no_grad():
@@ -189,5 +191,6 @@ if __name__ == "__main__":
     parser.add_argument("--bins", type=int, default=16, help="detector binning in native pixels, a multiple of 4")
     parser.add_argument("--outer", type=int, default=50, help="geometry steps")
     parser.add_argument("--inner", type=int, default=2, help="SIRT iterations between geometry steps")
+    parser.add_argument("--backend", choices=("auto", "torch", "cuda"), default="auto")
     parser.add_argument("cases", nargs="*")
     main(parser.parse_args())

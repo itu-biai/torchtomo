@@ -102,7 +102,7 @@ projector = ConeBeam(
     voxel_spacing=(4.0, 3.90625, 3.90625),
     volume_center=(0.0, 0.0, scan_center_z),
     n_samples=192,
-    ray_chunk=2048,
+    backend="auto",
 )
 projections = projector(volume)          # [B, 1, views, rows, columns]
 adjoint_volume = projector.adjoint(projections)  # [B, 1, Z, Y, X]
@@ -113,12 +113,17 @@ geometry. The same interface handles circular and helical trajectories, flat and
 curved detectors, and per-view source offsets. Gradients reach both the volume
 and source/detector coordinate tensors. `backward()` aliases `adjoint()`.
 
-This is a PyTorch reference implementation with chunked trilinear integration on
-CPU and CUDA. It has no fused CUDA backend, FDK, or analytical backprojection.
-It generates sample grids as needed and stores the explicit detector coordinates;
-large scans should be split into view subsets. The
-autograd path retains interpolation stencils during training, so its memory use
-can exceed the temporary storage needed for evaluation. The
+`backend="cuda"` (or `"auto"`) runs float32 CUDA tensors on runtime-compiled
+kernels: an exact matched forward and adjoint pair, with the geometry gradient
+from a kernel of its own, storing nothing per sample. For a 256³ Shepp-Logan
+phantom and 360 views of 384 × 384 on an RTX 2080 Ti, a forward projection takes
+0.26 s, the adjoint 0.33 s, and a forward with the gradient of every source and
+detector position 0.40 s, against 207 s, 232 s, and out of memory on the PyTorch
+path ([comparison with ASTRA and LEAP](https://github.com/itu-biai/torchtomo-benchmark/blob/main/libraries/README.md#3d-cone-beam-and-breast-tomosynthesis)).
+The default `"torch"` path integrates trilinearly in chunks of `ray_chunk` rays
+on any device and dtype; its autograd retains interpolation stencils, so geometry
+gradients there fit only small scans. Neither has FDK or an analytical
+backprojection. The
 [cone beam examples](benchmark/README.md) include a synthetic check and a TCIA
 helical reconstruction pilot. The optional CT-PD reader requires
 `pip install 'torchtomo[tcia]'`; it currently accepts uncompressed unsigned
@@ -170,9 +175,10 @@ the projection conversion of the BIAI Lab DBT 2026v1 dataset.
 `victre_projector(density, bin_factor=4)` returns the projector on that
 dataset's grid, `read_projections(folder)` reads the 25 stored views, and
 `convert_projections(views)` returns line integrals, a valid-ray mask, and the
-per-view air levels. The readers need `pip install 'torchtomo[tcia]'`. Like
-`ConeBeam`, this is an experimental PyTorch reference without a fused kernel or
-an analytical FBP; [`benchmark/dbt`](benchmark/README.md#breast-tomosynthesis)
+per-view air levels. The readers need `pip install 'torchtomo[tcia]'`.
+`backend="cuda"` selects `ConeBeam`'s kernels, including for the geometry
+gradient. Like `ConeBeam`, it is experimental and has no analytical FBP;
+[`benchmark/dbt`](benchmark/README.md#breast-tomosynthesis)
 reconstructs one VICTRE phantom with it.
 
 ## Operators and tensor shapes
@@ -272,9 +278,9 @@ checkpoint compatibility, and measured calibration results.
 
 | Backend | Geometries | Execution |
 | --- | --- | --- |
-| `"torch"` (default) | Parallel, fan | PyTorch operations on CPU, CUDA, or MPS |
-| `"auto"` | Parallel, fan | Selects `"cuda"` when NVRTC loads; otherwise `"torch"` |
-| `"cuda"` | Parallel, fan | Runtime-compiled kernels for float32 CUDA tensors; PyTorch fallback for other devices/dtypes or unavailable NVRTC |
+| `"torch"` (default) | Parallel, fan, cone, tomosynthesis | PyTorch operations on CPU, CUDA, or MPS |
+| `"auto"` | Parallel, fan, cone, tomosynthesis | Selects `"cuda"` when NVRTC loads; otherwise `"torch"` |
+| `"cuda"` | Parallel, fan, cone, tomosynthesis | Runtime-compiled kernels for float32 CUDA tensors; PyTorch fallback for other devices/dtypes or unavailable NVRTC |
 | `"triton"` | Parallel | Optional fused Triton kernels where supported; PyTorch fallback otherwise |
 
 ```python

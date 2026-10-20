@@ -120,6 +120,7 @@ class BreastTomosynthesis(nn.Module):
     geometry trainable. A trainable geometry rebuilds the source and detector
     positions on every call, so gradients reach it and optimiser steps take
     effect immediately. A fixed geometry keeps the positions built once.
+    ``backend`` selects ConeBeam's PyTorch path or its CUDA kernels.
     """
 
     def __init__(
@@ -140,6 +141,7 @@ class BreastTomosynthesis(nn.Module):
         volume_center: tuple[float, float, float] = (0.0, 0.0, 0.0),
         n_samples: int | None = None,
         ray_chunk: int = 1024,
+        backend: str = "torch",
         learnable_geometry: bool = False,
         dtype: torch.dtype | None = None,
         device: torch.device | str | None = None,
@@ -176,6 +178,7 @@ class BreastTomosynthesis(nn.Module):
             volume_center,
             n_samples=n_samples,
             ray_chunk=ray_chunk,
+            backend=backend,
         )
 
     @property

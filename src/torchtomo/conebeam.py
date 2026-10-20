@@ -4,6 +4,11 @@ import itertools
 
 import torch
 from torch import nn
+from torch.autograd.function import once_differentiable
+
+from . import _cone_kernels
+from ._cuda_kernels import cuda_kernels_available
+from .base import _check_backend
 
 
 class ConeBeam(nn.Module):
@@ -18,9 +23,18 @@ class ConeBeam(nn.Module):
 
     Explicit detector coordinates support flat and curved panels, helical
     trajectories, and source offsets without approximating them as 2D slices.
-    Ray samples are generated in chunks, rather than cached for the whole scan.
-    This reference backend uses PyTorch on CPU or CUDA. Geometry tensors can
-    require gradients, including when derived from other trainable parameters.
+    Geometry tensors can require gradients, including when derived from other
+    trainable parameters.
+
+    ``backend="torch"`` (the default) runs on PyTorch operations on any device and
+    dtype, generating ray samples in chunks of ``ray_chunk`` rays rather than
+    caching them for the whole scan. ``backend="cuda"`` runs float32 CUDA tensors
+    on kernels compiled at first use by the NVRTC that ships with PyTorch: the
+    forward and adjoint are an exact matched pair, their gradients are each
+    other, and a geometry that requires a gradient gets it from a kernel of its
+    own, to first order. Nothing per sample is stored. ``"auto"`` is ``"cuda"``
+    where NVRTC loads and ``"torch"`` elsewhere; other tensors fall back to the
+    PyTorch path call by call.
     """
 
     def __init__(
@@ -32,8 +46,10 @@ class ConeBeam(nn.Module):
         volume_center: tuple[float, float, float] = (0.0, 0.0, 0.0),
         n_samples: int | None = None,
         ray_chunk: int = 1024,
+        backend: str = "torch",
     ):
         super().__init__()
+        self.backend = _check_backend(backend, ("auto", "torch", "cuda"))
         if len(volume_shape) != 3 or any(int(size) != size or size < 2 for size in volume_shape):
             raise ValueError("volume_shape must contain three integers of at least 2, in Z, Y, X order")
         if source_positions.ndim != 2 or source_positions.shape[-1] != 3 or source_positions.shape[0] < 1:
@@ -67,6 +83,37 @@ class ConeBeam(nn.Module):
         self.register_buffer("spacing_xyz", spacing.flip(0))
         self.register_buffer("volume_center", center)
         self.register_buffer("corners", torch.tensor(list(itertools.product((0, 1), repeat=3)), device=spacing.device))
+
+    def _box(self) -> torch.Tensor:
+        return _cone_kernels.volume_box(self.volume_shape, self.spacing_xyz, self.volume_center)
+
+    def _use_kernels(self, tensor: torch.Tensor) -> bool:
+        return (
+            self.backend == "cuda"
+            and cuda_kernels_available(tensor.device, tensor.dtype)
+            and _cone_kernels.kernels_fit(self.volume_shape, self.projection_shape)
+        )
+
+    def _kernel_forward(self, volume: torch.Tensor, sources: torch.Tensor, detectors: torch.Tensor) -> torch.Tensor:
+        box = self._box()
+        return _cone_kernels.cone_forward(volume.contiguous(), sources, detectors, box, self.n_samples)
+
+    def _kernel_adjoint(
+        self, projections: torch.Tensor, sources: torch.Tensor, detectors: torch.Tensor
+    ) -> torch.Tensor:
+        box = self._box()
+        return _cone_kernels.cone_adjoint(
+            projections.contiguous(), sources, detectors, box, self.n_samples, self.volume_shape
+        )
+
+    def _kernel_geometry_grad(
+        self, volume: torch.Tensor, grad: torch.Tensor, sources: torch.Tensor, detectors: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        box = self._box()
+        grad_sources, grad_detectors = _cone_kernels.cone_geometry_grad(
+            volume.contiguous(), grad.contiguous(), sources, detectors, box, self.n_samples
+        )
+        return grad_sources.to(sources.dtype), grad_detectors.to(detectors.dtype)
 
     def _check_input(self, tensor: torch.Tensor, shape: tuple[int, ...]) -> None:
         if tensor.ndim != len(shape) + 2 or tensor.shape[1] != 1 or tuple(tensor.shape[2:]) != shape:
@@ -120,6 +167,10 @@ class ConeBeam(nn.Module):
 
     def _project(self, volume: torch.Tensor, sources: torch.Tensor, detectors: torch.Tensor) -> torch.Tensor:
         self._check_input(volume, self.volume_shape)
+        if self._use_kernels(volume):
+            if _wants_geometry_grad(sources, detectors):
+                return _KernelGeometryProject.apply(volume, self, sources, detectors)
+            return _KernelProject.apply(volume, self, sources.detach(), detectors.detach())
         batch = volume.shape[0]
         flat_volume = volume.reshape(batch, -1)
         ray_count = detectors.numel() // 3
@@ -136,6 +187,10 @@ class ConeBeam(nn.Module):
 
     def _backproject(self, projections: torch.Tensor, sources: torch.Tensor, detectors: torch.Tensor) -> torch.Tensor:
         self._check_input(projections, self.projection_shape)
+        if self._use_kernels(projections):
+            if _wants_geometry_grad(sources, detectors):
+                return _KernelGeometryAdjoint.apply(projections, self, sources, detectors)
+            return _KernelAdjoint.apply(projections, self, sources.detach(), detectors.detach())
         batch = projections.shape[0]
         flat_projections = projections.reshape(batch, -1)
         image = projections.new_zeros(batch, self.volume_shape[0] * self.volume_shape[1] * self.volume_shape[2])
@@ -149,3 +204,86 @@ class ConeBeam(nn.Module):
     def backward(self, projections: torch.Tensor) -> torch.Tensor:
         """Alias for :meth:`adjoint`, consistent with the 2D projectors."""
         return self.adjoint(projections)
+
+
+def _wants_geometry_grad(sources: torch.Tensor, detectors: torch.Tensor) -> bool:
+    return torch.is_grad_enabled() and (sources.requires_grad or detectors.requires_grad)
+
+
+class _KernelProject(torch.autograd.Function):
+    """A x on the CUDA kernels for a fixed geometry; the VJP is the kernel adjoint."""
+
+    @staticmethod
+    def forward(ctx, volume, operator, sources, detectors):
+        ctx.operator, ctx.geometry = operator, (sources, detectors)
+        return operator._kernel_forward(volume, sources, detectors)
+
+    @staticmethod
+    def backward(ctx, grad_projections):
+        # Through apply, so the gradient itself is differentiable (double backward).
+        return _KernelAdjoint.apply(grad_projections, ctx.operator, *ctx.geometry), None, None, None
+
+
+class _KernelAdjoint(torch.autograd.Function):
+    """A^T y on the CUDA kernels for a fixed geometry; the VJP is the kernel forward."""
+
+    @staticmethod
+    def forward(ctx, projections, operator, sources, detectors):
+        ctx.operator, ctx.geometry = operator, (sources, detectors)
+        return operator._kernel_adjoint(projections, sources, detectors)
+
+    @staticmethod
+    def backward(ctx, grad_volume):
+        return _KernelProject.apply(grad_volume, ctx.operator, *ctx.geometry), None, None, None
+
+
+class _KernelGeometryProject(torch.autograd.Function):
+    """A x on the CUDA kernels for a geometry that wants a gradient.
+
+    First order only: the geometry gradient comes from a kernel with no derivative
+    of its own, so a second derivative raises instead of quietly missing the terms
+    that pass through the geometry.
+    """
+
+    @staticmethod
+    def forward(ctx, volume, operator, sources, detectors):
+        ctx.operator = operator
+        ctx.save_for_backward(volume, sources, detectors)
+        return operator._kernel_forward(volume, sources, detectors)
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_projections):
+        volume, sources, detectors = ctx.saved_tensors
+        operator = ctx.operator
+        grad_volume = None
+        if ctx.needs_input_grad[0]:
+            grad_volume = operator._kernel_adjoint(grad_projections, sources, detectors)
+        grad_sources = grad_detectors = None
+        if ctx.needs_input_grad[2] or ctx.needs_input_grad[3]:
+            grad_sources, grad_detectors = operator._kernel_geometry_grad(volume, grad_projections, sources, detectors)
+        return grad_volume, None, grad_sources, grad_detectors
+
+
+class _KernelGeometryAdjoint(torch.autograd.Function):
+    """A^T y on the CUDA kernels for a geometry that wants a gradient; see above."""
+
+    @staticmethod
+    def forward(ctx, projections, operator, sources, detectors):
+        ctx.operator = operator
+        ctx.save_for_backward(projections, sources, detectors)
+        return operator._kernel_adjoint(projections, sources, detectors)
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_volume):
+        projections, sources, detectors = ctx.saved_tensors
+        operator = ctx.operator
+        grad_projections = None
+        if ctx.needs_input_grad[0]:
+            grad_projections = operator._kernel_forward(grad_volume, sources, detectors)
+        grad_sources = grad_detectors = None
+        if ctx.needs_input_grad[2] or ctx.needs_input_grad[3]:
+            # <u, A^T y> = <A u, y>: the forward's geometry gradient with the roles swapped.
+            grad_sources, grad_detectors = operator._kernel_geometry_grad(grad_volume, projections, sources, detectors)
+        return grad_projections, None, grad_sources, grad_detectors

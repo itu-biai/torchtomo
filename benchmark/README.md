@@ -129,7 +129,9 @@ dataset's 752 x 384 detector at 0.34 mm and 57 x 336 x 408 volume.
 | 4 | reversed view order | -0.382 | -0.283 | 48.8% | 47.0% |
 
 At bin 4, FBP took 36 s and OS-SART 400 s, with 4.2 GiB peak PyTorch allocation;
-at bin 8, 4.5 s and 51 s. The published geometry agrees with VICTRE's FBP better
+at bin 8, 4.5 s and 51 s. On ConeBeam's CUDA kernels (`--backend cuda`, the
+default `auto` on a GPU), an RTX 2080 Ti reproduces the bin 4 scores to three
+decimals with FBP in 0.08 s and OS-SART in 0.37 s, in 736 MiB. The published geometry agrees with VICTRE's FBP better
 than the lab's LEAP FBP did on three scattered phantoms (0.866) and less well
 than its pyDBT FBP (0.920), whose placement was tuned on the reference; those
 used their own mask and 0.34 mm binning. The OS-SART breast median is 0.035
@@ -155,7 +157,8 @@ python benchmark/dbt/calibrate_victre.py \
 ```
 
 On 2026-10-19, phantom 694607065 at 1.36 mm detector bins, 50 geometry steps
-with cosine-decayed learning rates, on an RTX 2080 Ti (about 8 minutes per case):
+with cosine-decayed learning rates, on an RTX 2080 Ti (about 8 minutes per case on
+the PyTorch path; 0.7 s on the CUDA kernels, with the same results):
 
 | Start | Learns | End | FBP correlation, start to end |
 | --- | --- | --- | ---: |
@@ -168,8 +171,10 @@ Only the radius moves substantially toward the published value. With 25 views
 over 50 degrees, a re-fitted volume absorbs angle and source-position errors,
 and from the correct start the fit drifts away and the image gets worse. The
 projection residual falls in every case, mostly from the extra SIRT iterations,
-so it cannot select the geometry. Calibration from projections alone is
-therefore unreliable for this geometry; the trainable geometry is better suited
+so it cannot select the geometry. At the full 0.34 mm binning, which the
+kernels' geometry gradient makes practical (7.6 s), the published start drifts the
+same way: radius 597.5 mm, `source_y` -61.8 mm, FBP correlation 0.896 to 0.663.
+Calibration from projections alone is therefore unreliable for this geometry; the trainable geometry is better suited
 to a known calibration object, as in the synthetic test in `tests/test_dbt.py`.
 
 Please cite Badano et al., "Evaluation of Digital Breast Tomosynthesis as
