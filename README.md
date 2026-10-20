@@ -157,6 +157,13 @@ projector = BreastTomosynthesis(
 )
 ```
 
+The projector is differentiable in the volume, in its projections through
+`adjoint()`, and in its geometry. `learnable_geometry=True` registers `angles`
+(one per view) and `distances` (`source_to_detector`, `source_to_axis`,
+`source_y`) as parameters, and positions are rebuilt on every call so optimiser
+steps take effect at once. To calibrate only part of the geometry, zero the other
+gradients or call `requires_grad_(True)` on one buffer of a fixed projector.
+
 `torchtomo.victre` holds the published geometry of the
 [TCIA VICTRE](https://www.cancerimagingarchive.net/collection/victre/) trial and
 the projection conversion of the BIAI Lab DBT 2026v1 dataset.

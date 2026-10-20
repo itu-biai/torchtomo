@@ -12,6 +12,7 @@ reader and matplotlib. These scripts are separate from the installed library.
 | `angles/learn_angles.py` | learns which views to measure by differentiating the angle column |
 | `conebeam/check_feasibility.py` | standalone synthetic 3D helical reference, with a cylindrical detector, matched adjoint, geometry gradients, and CGLS |
 | `dbt/prepare_victre.py`, `dbt/reconstruct_victre.py` | one TCIA VICTRE breast tomosynthesis phantom: line integrals, FBP, OS-SART, held-out views, and wrong-geometry controls |
+| `dbt/calibrate_victre.py` | fits the VICTRE arc to its own projections from a wrong start, alternating SIRT and geometry gradient steps |
 
 ```bash
 make benchmark-speed      # the backend speed table
@@ -140,6 +141,36 @@ reversed views clearly but separates the source position by at most 0.05
 percentage points; the correlation with VICTRE's reconstruction is what pins the
 source above the chest wall. This is one phantom with simulated physics and a
 scalar flat field per view.
+
+`dbt/calibrate_victre.py` tests whether the trainable geometry can recover the
+arc from the projections alone. Each case starts from a geometry, reconstructs
+with SIRT, then alternates one Adam step on the chosen parameters, against the
+masked projection residual with the volume fixed, with two warm-started SIRT
+iterations. VICTRE's FBP is only compared before and after, never optimised.
+
+```bash
+python benchmark/dbt/calibrate_victre.py \
+    --input benchmark/dbt/results/victre/input_bin4.npz \
+    --output benchmark/dbt/results/calibration/bin16
+```
+
+On 2026-10-19, phantom 694607065 at 1.36 mm detector bins, 50 geometry steps
+with cosine-decayed learning rates, on an RTX 2080 Ti (about 8 minutes per case):
+
+| Start | Learns | End | FBP correlation, start to end |
+| --- | --- | --- | ---: |
+| published | angles, radius, `source_y` | radius 596.7 mm, `source_y` -60.7 mm, angles up to 0.39 degrees off | 0.855 to 0.753 |
+| angles +3 degrees | angles | mean error 2.79 degrees | 0.280 to 0.318 |
+| `source_y` 0 mm | `source_y` | -2.0 mm, published -65.3 mm | 0.589 to 0.596 |
+| radius 630 mm | radius | 610.5 mm, published 600 mm | 0.340 to 0.650 |
+
+Only the radius moves substantially toward the published value. With 25 views
+over 50 degrees, a re-fitted volume absorbs angle and source-position errors,
+and from the correct start the fit drifts away and the image gets worse. The
+projection residual falls in every case, mostly from the extra SIRT iterations,
+so it cannot select the geometry. Calibration from projections alone is
+therefore unreliable for this geometry; the trainable geometry is better suited
+to a known calibration object, as in the synthetic test in `tests/test_dbt.py`.
 
 Please cite Badano et al., "Evaluation of Digital Breast Tomosynthesis as
 Replacement of Full-Field Digital Mammography Using an In Silico Imaging Trial",
