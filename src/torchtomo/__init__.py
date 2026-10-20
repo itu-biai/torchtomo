@@ -25,7 +25,7 @@ from .filters import apply_filter, get_filter
 from .parallel import ParallelBeam
 from .phantom import circle_phantom, shepp_logan
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __all__ = [
     "ParallelBeam",
     "FanBeam",
