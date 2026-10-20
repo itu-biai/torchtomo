@@ -21,6 +21,7 @@ import torch
 from torch import nn
 
 from .conebeam import ConeBeam
+from .filters import FilterType
 
 
 def arc_angles(
@@ -234,3 +235,7 @@ class BreastTomosynthesis(nn.Module):
     def backward(self, projections: torch.Tensor) -> torch.Tensor:
         """Alias for :meth:`adjoint`, consistent with the other projectors."""
         return self.adjoint(projections)
+
+    def fdk(self, projections: torch.Tensor, filter_name: FilterType = "ramp") -> torch.Tensor:
+        """Filtered backprojection along tube travel; see :meth:`ConeBeam.fdk`."""
+        return self.operator._fdk(projections, *self._current_positions(), filter_name)

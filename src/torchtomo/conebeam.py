@@ -6,9 +6,10 @@ import torch
 from torch import nn
 from torch.autograd.function import once_differentiable
 
-from . import _cone_kernels
+from . import _cone_kernels, _fdk
 from ._cuda_kernels import cuda_kernels_available
 from .base import _check_backend
+from .filters import FilterType
 
 
 class ConeBeam(nn.Module):
@@ -35,6 +36,10 @@ class ConeBeam(nn.Module):
     own, to first order. Nothing per sample is stored. ``"auto"`` is ``"cuda"``
     where NVRTC loads and ``"torch"`` elsewhere; other tensors fall back to the
     PyTorch path call by call.
+
+    :meth:`fdk` reconstructs flat-panel scans analytically. It runs on the kernels
+    under the same rules, except that a geometry requiring a gradient takes the
+    PyTorch path.
     """
 
     def __init__(
@@ -83,6 +88,7 @@ class ConeBeam(nn.Module):
         self.register_buffer("spacing_xyz", spacing.flip(0))
         self.register_buffer("volume_center", center)
         self.register_buffer("corners", torch.tensor(list(itertools.product((0, 1), repeat=3)), device=spacing.device))
+        self._fdk_cache: tuple[tuple, _fdk.FdkGeometry] | None = None
 
     def _box(self) -> torch.Tensor:
         return _cone_kernels.volume_box(self.volume_shape, self.spacing_xyz, self.volume_center)
@@ -205,6 +211,40 @@ class ConeBeam(nn.Module):
         """Alias for :meth:`adjoint`, consistent with the 2D projectors."""
         return self.adjoint(projections)
 
+    def fdk(self, projections: torch.Tensor, filter_name: FilterType = "ramp") -> torch.Tensor:
+        """Feldkamp-Davis-Kress reconstruction, [B, 1, views, rows, columns] -> [B, 1, Z, Y, X].
+
+        Panels must be flat with evenly spaced rows and columns, and views must be in
+        orbit order: each view's weight comes from the source's step to its
+        neighbours. The ramp filter runs along whichever detector axis the source
+        moves along. An orbit that closes a full turn measures every line twice and
+        is halved; shorter scans, such as tomosynthesis, are not, and get no Parker
+        weights. For a circular orbit this is Feldkamp's algorithm, exact in the
+        orbit plane; elsewhere it is the same approximation, applied per view.
+        """
+        return self._fdk(projections, self.source_positions, self.detector_positions, filter_name)
+
+    def _fdk_geometry(self, sources: torch.Tensor, detectors: torch.Tensor) -> _fdk.FdkGeometry:
+        arguments = (sources, detectors, self.volume_shape, self.spacing_xyz, self.volume_center)
+        own = sources is self.source_positions and detectors is self.detector_positions
+        if not own or _wants_geometry_grad(sources, detectors):
+            return _fdk.fdk_geometry(*arguments)
+        key = tuple((tensor.data_ptr(), tensor._version, tensor.device, tensor.dtype) for tensor in arguments[:2])
+        if self._fdk_cache is None or self._fdk_cache[0] != key:
+            with torch.no_grad():
+                self._fdk_cache = (key, _fdk.fdk_geometry(*arguments))
+        return self._fdk_cache[1]
+
+    def _fdk(
+        self, projections: torch.Tensor, sources: torch.Tensor, detectors: torch.Tensor, filter_name: FilterType
+    ) -> torch.Tensor:
+        self._check_input(projections, self.projection_shape)
+        geometry = self._fdk_geometry(sources, detectors)
+        filtered = _fdk.filter_lines(projections * geometry.weights, geometry.axis, filter_name)
+        if self._use_kernels(projections) and not _wants_geometry_grad(sources, detectors):
+            return _KernelFdkBackproject.apply(filtered, self, geometry.matrices)
+        return _fdk.backproject(filtered, geometry.matrices, self.volume_shape)
+
 
 def _wants_geometry_grad(sources: torch.Tensor, detectors: torch.Tensor) -> bool:
     return torch.is_grad_enabled() and (sources.requires_grad or detectors.requires_grad)
@@ -287,3 +327,29 @@ class _KernelGeometryAdjoint(torch.autograd.Function):
             # <u, A^T y> = <A u, y>: the forward's geometry gradient with the roles swapped.
             grad_sources, grad_detectors = operator._kernel_geometry_grad(grad_volume, projections, sources, detectors)
         return grad_projections, None, grad_sources, grad_detectors
+
+
+class _KernelFdkBackproject(torch.autograd.Function):
+    """FDK's weighted backprojection on the CUDA kernels; the VJP is the kernel transpose."""
+
+    @staticmethod
+    def forward(ctx, filtered, operator, matrices):
+        ctx.operator, ctx.matrices = operator, matrices
+        return _cone_kernels.fdk_backproject(filtered.contiguous(), matrices, operator.volume_shape)
+
+    @staticmethod
+    def backward(ctx, grad_volume):
+        return _KernelFdkTranspose.apply(grad_volume, ctx.operator, ctx.matrices), None, None
+
+
+class _KernelFdkTranspose(torch.autograd.Function):
+    """The transpose of FDK's backprojection; the VJP is the backprojection."""
+
+    @staticmethod
+    def forward(ctx, volume, operator, matrices):
+        ctx.operator, ctx.matrices = operator, matrices
+        return _cone_kernels.fdk_backproject_transpose(volume, matrices, operator.projection_shape)
+
+    @staticmethod
+    def backward(ctx, grad_projections):
+        return _KernelFdkBackproject.apply(grad_projections, ctx.operator, ctx.matrices), None, None

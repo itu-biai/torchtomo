@@ -106,6 +106,7 @@ projector = ConeBeam(
 )
 projections = projector(volume)          # [B, 1, views, rows, columns]
 adjoint_volume = projector.adjoint(projections)  # [B, 1, Z, Y, X]
+reconstruction = projector.fdk(projections)      # flat panels only
 ```
 
 Provide `sources`, `detector_elements`, and `scan_center_z` from the acquisition
@@ -122,8 +123,15 @@ detector position 0.40 s, against 207 s, 232 s, and out of memory on the PyTorch
 path ([comparison with ASTRA and LEAP](https://github.com/itu-biai/torchtomo-benchmark/blob/main/libraries/README.md#3d-cone-beam-and-breast-tomosynthesis)).
 The default `"torch"` path integrates trilinearly in chunks of `ray_chunk` rays
 on any device and dtype; its autograd retains interpolation stencils, so geometry
-gradients there fit only small scans. Neither has FDK or an analytical
-backprojection. The
+gradients there fit only small scans.
+
+`fdk(projections, filter_name="ramp")` is Feldkamp-Davis-Kress reconstruction for
+flat panels, with its weights derived from the explicit positions: views must be
+in orbit order, and the filter runs along the detector axis the source moves
+along. An orbit that closes a full turn is halved; shorter scans get no Parker
+weights. It runs on both paths and is differentiable in the projections and, on
+the PyTorch path, in the geometry. On the scan above it takes 58 ms on the
+kernels, against 44 ms for ASTRA's FDK, and agrees with ASTRA's to 0.04%. The
 [cone beam examples](benchmark/README.md) include a synthetic check and a TCIA
 helical reconstruction pilot. The optional CT-PD reader requires
 `pip install 'torchtomo[tcia]'`; it currently accepts uncompressed unsigned
@@ -177,8 +185,10 @@ dataset's grid, `read_projections(folder)` reads the 25 stored views, and
 `convert_projections(views)` returns line integrals, a valid-ray mask, and the
 per-view air levels. The readers need `pip install 'torchtomo[tcia]'`.
 `backend="cuda"` selects `ConeBeam`'s kernels, including for the geometry
-gradient. Like `ConeBeam`, it is experimental and has no analytical FBP;
-[`benchmark/dbt`](benchmark/README.md#breast-tomosynthesis)
+gradient. `fdk(projections, "hann")` filters along tube travel and backprojects;
+on a VICTRE phantom it correlates 0.885 with the dataset's own FBP, as the
+dataset's filter followed by `adjoint()` does. Like `ConeBeam`, it is
+experimental; [`benchmark/dbt`](benchmark/README.md#breast-tomosynthesis)
 reconstructs one VICTRE phantom with it.
 
 ## Operators and tensor shapes

@@ -448,3 +448,140 @@ extern "C" __global__ void __launch_bounds__(128)
 {
     cone_adjoint(projections, sources, detectors, box, out, X, Y, Z, R, W, n);
 }
+
+// FDK backprojection. A view's matrix, twelve floats, maps a voxel index (x, y, z, 1)
+// to (column w, row w, w), w being the voxel's depth along the panel normal over the
+// panel's. A voxel gathers every view's filtered projection there, bilinear with zero
+// off the panel, weighted by 1 / w^2. The transpose scatters the same weights, from
+// the same code, so the two are each other's transpose up to float32 addition order.
+
+struct PanelStencil {
+    unsigned index[4];
+    float weight[4];
+};
+
+// A view's matrix rows with the voxel's x and y applied: what is left is linear in z.
+struct ViewColumn {
+    float column, column_z, row, row_z, depth, depth_z;
+};
+
+__device__ __forceinline__ ViewColumn view_column(const float* __restrict__ matrix, float x, float y)
+{
+    const float4 c = __ldg(reinterpret_cast<const float4*>(matrix));
+    const float4 r = __ldg(reinterpret_cast<const float4*>(matrix) + 1);
+    const float4 d = __ldg(reinterpret_cast<const float4*>(matrix) + 2);
+    return {fmaf(c.x, x, fmaf(c.y, y, c.w)), c.z, fmaf(r.x, x, fmaf(r.y, y, r.w)), r.z,
+            fmaf(d.x, x, fmaf(d.y, y, d.w)), d.z};
+}
+
+__device__ __forceinline__ bool panel_stencil(const ViewColumn& v, float z, int rows, int columns, PanelStencil& s)
+{
+    const float w = fmaf(v.depth_z, z, v.depth);
+    if (!(w > 0.f)) return false;
+    const float inverse = 1.f / w;
+    const float column = fmaf(v.column_z, z, v.column) * inverse;
+    const float row = fmaf(v.row_z, z, v.row) * inverse;
+    if (!(column > -1.f && column < (float)columns && row > -1.f && row < (float)rows)) return false;
+    const float column_floor = floorf(column), row_floor = floorf(row);
+    const int c0 = (int)column_floor, r0 = (int)row_floor;
+    const float dc = column - column_floor, dr = row - row_floor;
+    const float scale = inverse * inverse;
+    const float wc0 = c0 >= 0 ? 1.f - dc : 0.f;
+    const float wc1 = c0 + 1 < columns ? dc : 0.f;
+    const float wr0 = r0 >= 0 ? (1.f - dr) * scale : 0.f;
+    const float wr1 = r0 + 1 < rows ? dr * scale : 0.f;
+    const unsigned left = max(c0, 0), right = min(c0 + 1, columns - 1);
+    const unsigned top = max(r0, 0) * (unsigned)columns, bottom = min(r0 + 1, rows - 1) * (unsigned)columns;
+    s.index[0] = top + left;
+    s.index[1] = top + right;
+    s.index[2] = bottom + left;
+    s.index[3] = bottom + right;
+    s.weight[0] = wr0 * wc0;
+    s.weight[1] = wr0 * wc1;
+    s.weight[2] = wr1 * wc0;
+    s.weight[3] = wr1 * wc1;
+    return true;
+}
+
+// Each thread backprojects TT_FDK_DEPTH voxels along z, sharing its view loads.
+#define TT_FDK_DEPTH 4
+
+template <int C>
+__device__ __forceinline__ void fdk_backproject(const float* __restrict__ projections,
+                                                const float* __restrict__ matrices, float* __restrict__ out, int X,
+                                                int Y, int Z, int views, int rows, int columns, int nb, size_t plane)
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    const int z0 = blockIdx.z * TT_FDK_DEPTH;
+    if (x >= X || y >= Y) return;
+    const size_t panel = (size_t)rows * columns;
+    float acc[TT_FDK_DEPTH][C] = {};
+    for (int view = 0; view < views; ++view) {
+        const ViewColumn v = view_column(matrices + 12 * view, (float)x, (float)y);
+        const float* base = projections + view * panel * C;
+#pragma unroll
+        for (int j = 0; j < TT_FDK_DEPTH; ++j) {
+            PanelStencil s;
+            if (z0 + j >= Z || !panel_stencil(v, (float)(z0 + j), rows, columns, s)) continue;
+#pragma unroll
+            for (int q = 0; q < 4; ++q) {
+                float p[C];
+                fetch<C>(base, s.index[q], p);
+#pragma unroll
+                for (int k = 0; k < C; ++k) acc[j][k] = fmaf(s.weight[q], p[k], acc[j][k]);
+            }
+        }
+    }
+#pragma unroll
+    for (int j = 0; j < TT_FDK_DEPTH; ++j) {
+        if (z0 + j >= Z) break;
+        const size_t voxel = ((size_t)(z0 + j) * Y + y) * X + x;
+#pragma unroll
+        for (int k = 0; k < C; ++k)
+            if (k < nb) out[k * plane + voxel] = acc[j][k];
+    }
+}
+
+#define TT_FDK(C)                                                                                             \
+    extern "C" __global__ void __launch_bounds__(128)                                                         \
+        fdk_backproject_c##C(const float* projections, const float* matrices, float* out, int X, int Y, int Z, \
+                             int views, int rows, int columns, int nb, size_t plane)                           \
+    {                                                                                                         \
+        fdk_backproject<C>(projections, matrices, out, X, Y, Z, views, rows, columns, nb, plane);             \
+    }
+
+TT_FDK(1)
+TT_FDK(2)
+TT_FDK(4)
+
+extern "C" __global__ void __launch_bounds__(128)
+    fdk_backproject_transpose_c1(const float* volume, const float* matrices, float* out, int X, int Y, int Z,
+                                 int views, int rows, int columns)
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    const int z0 = blockIdx.z * TT_FDK_DEPTH;
+    if (x >= X || y >= Y) return;
+    float value[TT_FDK_DEPTH];
+    bool any = false;
+#pragma unroll
+    for (int j = 0; j < TT_FDK_DEPTH; ++j) {
+        value[j] = z0 + j < Z ? volume[((size_t)(z0 + j) * Y + y) * X + x] : 0.f;
+        any |= value[j] != 0.f;
+    }
+    if (!any) return;
+    const size_t panel = (size_t)rows * columns;
+    for (int view = 0; view < views; ++view) {
+        const ViewColumn v = view_column(matrices + 12 * view, (float)x, (float)y);
+        float* base = out + view * panel;
+#pragma unroll
+        for (int j = 0; j < TT_FDK_DEPTH; ++j) {
+            PanelStencil s;
+            if (value[j] == 0.f || !panel_stencil(v, (float)(z0 + j), rows, columns, s)) continue;
+#pragma unroll
+            for (int q = 0; q < 4; ++q)
+                if (s.weight[q] != 0.f) atomicAdd(base + s.index[q], s.weight[q] * value[j]);
+        }
+    }
+}
