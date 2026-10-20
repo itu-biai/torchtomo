@@ -104,7 +104,7 @@ def save_figure(reconstruction: torch.Tensor, reference: torch.Tensor, water: fl
 
 
 @torch.no_grad()
-def reconstruct(input_path: Path, output: Path, iterations: int, device: str) -> None:
+def reconstruct(input_path: Path, output: Path, iterations: int, device: str, backend: str = "auto") -> None:
     output.mkdir(parents=True, exist_ok=True)
     data = np.load(input_path, allow_pickle=False)
     metadata = json.loads(str(data["metadata"]))
@@ -127,6 +127,7 @@ def reconstruct(input_path: Path, output: Path, iterations: int, device: str) ->
             center,
             n_samples=192,
             ray_chunk=2048,
+            backend=backend,
         )
 
     conventions = []
@@ -213,5 +214,6 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cuda")
+    parser.add_argument("--backend", choices=("auto", "torch", "cuda"), default="auto")
     args = parser.parse_args()
-    reconstruct(args.input, args.output, args.iterations, args.device)
+    reconstruct(args.input, args.output, args.iterations, args.device, args.backend)

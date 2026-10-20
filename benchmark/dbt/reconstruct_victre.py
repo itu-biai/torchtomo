@@ -136,7 +136,7 @@ def reconstruct(args) -> None:
     margin = args.depth_margin
     depth = reference.shape[2] + 2 * margin
     n_samples = args.n_samples or math.ceil(1.3 * depth / pixel)
-    options = dict(n_samples=n_samples, ray_chunk=args.ray_chunk, device=device)
+    options = dict(n_samples=n_samples, ray_chunk=args.ray_chunk, backend=args.backend, device=device)
     every_view = list(range(N_VIEWS))
     published = projector("published", density, bin_factor, every_view, 0, **options)
     mask = breast_mask(published, projections, valid, reference)
@@ -219,7 +219,8 @@ if __name__ == "__main__":
     parser.add_argument("--subsets", type=int, default=5)
     parser.add_argument("--depth-margin", type=int, default=8)
     parser.add_argument("--n-samples", type=int, help="default: 1.3 x depth / detector bin")
-    parser.add_argument("--ray-chunk", type=int, default=16384)
+    parser.add_argument("--ray-chunk", type=int, default=16384, help="rays per chunk on the PyTorch path")
+    parser.add_argument("--backend", choices=("auto", "torch", "cuda"), default="auto")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--save-volumes", action="store_true")
     reconstruct(parser.parse_args())
