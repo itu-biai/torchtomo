@@ -167,3 +167,48 @@ def cone_geometry_grad(
         if start > 0:
             grad_detectors += group_detectors
     return grad_sources, grad_detectors
+
+
+_VOLUME_BLOCK = (32, 4, 1)
+_FDK_DEPTH = 4
+
+
+def _volume_grid(volume_shape) -> tuple[int, int, int]:
+    depth, height, width = volume_shape
+    return (math.ceil(width / _VOLUME_BLOCK[0]), math.ceil(height / _VOLUME_BLOCK[1]), math.ceil(depth / _FDK_DEPTH))
+
+
+def fdk_backproject(projections: torch.Tensor, matrices: torch.Tensor, volume_shape) -> torch.Tensor:
+    """Filtered [B, 1, views, rows, columns] -> [B, 1, Z, Y, X], weighted by (D / l)^2; see _fdk."""
+    batch = projections.shape[0]
+    views, rows, columns = projections.shape[2:]
+    depth, height, width = volume_shape
+    flat = projections.reshape(batch, -1)
+    matrices = matrices.detach().float().contiguous()
+    out = projections.new_empty(batch, 1, *volume_shape)
+    library = _kernels()
+    for start, count, group in _groups(batch, _GROUP):
+        kernel = library.function(f"fdk_backproject_c{group}", projections.device)
+        kernel(
+            _volume_grid(volume_shape),
+            _VOLUME_BLOCK,
+            [_pack(flat, start, count, group), matrices, out[start], width, height, depth, views, rows, columns]
+            + [count, ctypes.c_size_t(depth * height * width)],
+        )
+    return out
+
+
+def fdk_backproject_transpose(volume: torch.Tensor, matrices: torch.Tensor, projection_shape) -> torch.Tensor:
+    """[B, 1, Z, Y, X] -> [B, 1, views, rows, columns], the transpose of fdk_backproject."""
+    batch, _, depth, height, width = volume.shape
+    views, rows, columns = projection_shape
+    matrices = matrices.detach().float().contiguous()
+    out = volume.new_zeros(batch, 1, *projection_shape)
+    kernel = _kernels().function("fdk_backproject_transpose_c1", volume.device)
+    for item in range(batch):
+        kernel(
+            _volume_grid((depth, height, width)),
+            _VOLUME_BLOCK,
+            [volume[item, 0].contiguous(), matrices, out[item, 0], width, height, depth, views, rows, columns],
+        )
+    return out
