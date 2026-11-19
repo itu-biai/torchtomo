@@ -53,7 +53,7 @@ class TestFanBeam:
             det_dist=500,
             det_spacing=1.0,
         )
-        assert projector.det_width == 200.0
+        assert projector.det_width == 199.0
 
     def test_det_width_param(self, img_size):
         projector = FanBeam(

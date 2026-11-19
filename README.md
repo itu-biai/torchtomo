@@ -81,7 +81,12 @@ reconstruction = projector.fbp(sinogram, filter_name="hann")
 Fan beam uses a flat detector. At size 256, the defaults are 384 detector bins
 and source-to-isocentre and isocentre-to-detector distances of 512 pixels.
 Set `n_det`, `src_dist`, `det_dist`, and `det_spacing` or `det_width` for a
-specific acquisition.
+specific acquisition. Fan-beam lengths are in image pixels, the pitch of the
+`linspace(-1, 1, img_size)` lattice, so for pixels of `p` mm pass millimetres
+divided by `p`. `det_width` spans the first to the last bin centre, and
+`det_spacing` is the bin pitch. The image spans `(img_size - 1) * p` mm, so
+divide line integrals in millimetres by its half extent,
+`(img_size - 1) / 2 * p`, and `fbp` returns attenuation in mm^-1.
 
 ## Experimental 3D Cone Beam
 
