@@ -72,10 +72,15 @@ class FanBeam(BaseProjector):
             img_size: Image size (assumed square)
             n_angles: Number of projection angles
             n_det: Detector bins (default: round(1.5 * img_size))
-            src_dist: Source to isocenter distance in pixels (default: 2 * img_size)
+            src_dist: Source to isocenter distance in pixels (default: 2 * img_size).
+                A pixel is the pitch of the image lattice, linspace(-1, 1, img_size),
+                so lengths in millimetres divided by the pixel size in millimetres
+                give the intended physical scale.
             det_dist: Isocenter to detector distance in pixels (default: 2 * img_size)
-            det_width: Total detector width (alternative to det_spacing)
-            det_spacing: Spacing between detector elements (alternative to det_width)
+            det_width: Distance in pixels between the centres of the first and last
+                detector bins (alternative to det_spacing)
+            det_spacing: Pitch of the detector bins in pixels (alternative to
+                det_width); det_width becomes det_spacing * (n_det - 1)
             angle_range: Range of angles (default: full rotation)
             n_samples: Samples per ray (default: img_size)
             circle: If True, mask image to inscribed circle. Rays are still
@@ -120,13 +125,13 @@ class FanBeam(BaseProjector):
 
         magnification = (src_dist + det_dist) / src_dist
         if det_spacing is not None:
-            det_width = det_spacing * n_det
+            det_width = det_spacing * (n_det - 1)
         elif det_width is None:
             det_width = 1.5 * magnification * img_size
         self.n_samples = n_samples
         self.circle = circle
 
-        self.scale = 2.0 / img_size
+        self.scale = self.shift_scale
         # The distances in float64 as built or last written; `distances` is the
         # tensor a gradient reaches, in the dtype of the rest of the geometry.
         self._distance_master = (src_dist, det_dist, float(det_width))
@@ -289,16 +294,6 @@ class FanBeam(BaseProjector):
         return super().__getattr__(name)
 
     @property
-    def shift_scale(self) -> float:
-        """One pixel of pose offset in normalised coordinates.
-
-        Fan beam states src_dist, det_dist and det_width in pixels of 2 / img_size,
-        so a pose offset is measured in the same pixel and every length in this
-        geometry means the same thing.
-        """
-        return self.scale
-
-    @property
     def _kernel_shift_unit(self) -> float:
         # fan_backproject works in the eager path's normalised coordinates.
         return self.shift_scale
@@ -351,7 +346,7 @@ class FanBeam(BaseProjector):
                 (self.n_det - 1) / 2,
                 (src + det) * centre,
                 width / (self.n_det - 1) * centre,
-                (self.n_samples - 1) / (self.n_samples * centre),
+                1 / centre,
                 shifted=not self._pose_is_plain(),
             )
         return _cuda_kernels.fan_adjoint(
@@ -429,7 +424,7 @@ class FanBeam(BaseProjector):
 
         rays [n_angles * n_det, 4]: entry point and sample step in pixel coordinates.
         inv_steps [n_angles * n_det, 2]: reciprocal of the step per axis, 0 where it is 0.
-        weights [n_angles * n_det]: chord length over n_samples.
+        weights [n_angles * n_det]: chord length over n_samples - 1, the sample spacing.
         views [n_angles * 2, 4]: source in pixels and detector direction, then the
         detector normal and the view's bin offset, (source shift - detector shift)
         over the bin pitch; the adjoint uses them to find candidate bins.
@@ -470,7 +465,7 @@ class FanBeam(BaseProjector):
         steps = rays[..., 2:]
         moving = steps.abs() > 1e-12
         inv_steps = torch.where(moving, 1.0 / torch.where(moving, steps, torch.ones_like(steps)), 0.0)
-        weights = chord / self.n_samples
+        weights = chord / max(self.n_samples - 1, 1)
         zeros = torch.zeros_like(cos_a)
         pitch = width / (self.n_det - 1)
         lateral = (pose[:, 2:3] - pose[:, 1:2]) * self.shift_scale / pitch
@@ -602,7 +597,7 @@ class FanBeam(BaseProjector):
             angle_count = end - start
             grids, lengths = self._ray_chunk(start, end)
             grid = grids.reshape(1, angle_count * self.n_det, self.n_samples, 2)
-            scale = lengths / self.n_samples
+            scale = lengths / max(self.n_samples - 1, 1)
             grad = (sinogram[:, 0, start:end, :] * scale).reshape(1, batch, angle_count * self.n_det, 1)
             grad = grad.expand(1, batch, angle_count * self.n_det, self.n_samples)
             out += grid_sample_input_backward(grad, shape_only, grid)
@@ -640,8 +635,8 @@ class FanBeam(BaseProjector):
             grids, lengths = self._ray_chunk(start, end)
             grid = grids.reshape(1, angle_count * self.n_det, self.n_samples, 2)
             samples = sample_bilinear(x.reshape(1, B, size, size), grid)
-            projection = samples.view(B, angle_count, self.n_det, self.n_samples).mean(dim=-1)
-            projection = projection * lengths
+            projection = samples.view(B, angle_count, self.n_det, self.n_samples).sum(dim=-1)
+            projection = projection * (lengths / max(self.n_samples - 1, 1))
             projections.append(projection.unsqueeze(1))
 
         return torch.cat(projections, dim=2)
@@ -704,16 +699,16 @@ class FanBeam(BaseProjector):
             src, det, width = self._lengths(sinogram.dtype, sinogram.device)
             span = src + det
             cos_w = span / torch.sqrt(span**2 + self._detector_offsets(width, sinogram.dtype, sinogram.device) ** 2)
-            virt_px = width / self.scale / self.n_det / (span / src)
+            virt_px = width / self.scale / (self.n_det - 1) / (span / src)
         else:
             cos_w = self.cos_weight
             # Ramp is built in bin units; convert to the virtual detector at the isocentre.
             mag = (self.src_dist + self.det_dist) / self.src_dist
-            virt_px = self.det_width / self.n_det / mag
+            virt_px = self.det_width / (self.n_det - 1) / mag
         weighted_sino = sinogram * cos_w.view(1, 1, 1, -1)
 
         filtered_sino = apply_filter(weighted_sino, filter_name)
-        filtered_sino = filtered_sino * (self.img_size / 2) / virt_px
+        filtered_sino = filtered_sino / (virt_px * self.scale)
 
         recon = self.backproject(filtered_sino)
 

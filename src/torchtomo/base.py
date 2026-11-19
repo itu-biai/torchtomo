@@ -344,8 +344,8 @@ class BaseProjector(nn.Module, ABC):
         """One pixel of offset in the [-1, 1] coordinates the grids work in.
 
         The image lattice is linspace(-1, 1, img_size), so a pixel is its spacing,
-        which for parallel beam is also exactly one detector bin. Fan beam measures
-        its distances against a slightly different pixel and overrides this.
+        which for parallel beam is also exactly one detector bin. Fan beam states
+        its distances in the same pixel.
         """
         return 2.0 / max(self.img_size - 1, 1)
 
