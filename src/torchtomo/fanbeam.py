@@ -22,6 +22,21 @@ from .filters import FilterType, apply_filter
 _EAGER_GEOMETRY = ("ray_grids", "ray_lengths", "backward_grids", "backward_weights")
 
 
+def _ray_radius(img_size: int, circle: bool) -> float:
+    """Radius, in normalised coordinates, of the disc rays are clipped to.
+
+    Pixel centres span [-1, 1]. With the circle mask that disc is the inscribed
+    circle. Without it the disc must hold the bilinear footprint of every pixel,
+    which reaches one pixel pitch, 2 / (img_size - 1), past the outermost centres;
+    the corners' footprints therefore end at sqrt(2) (img_size + 1) / (img_size - 1).
+    """
+    if circle:
+        return 1.0
+    if img_size < 2:
+        return float(np.sqrt(2.0))
+    return float(np.sqrt(2.0) * (img_size + 1) / (img_size - 1))
+
+
 class FanBeam(BaseProjector):
     """
     Fan beam CT projector with flat detector.
@@ -37,7 +52,8 @@ class FanBeam(BaseProjector):
 
     Distances default to twice the image size and the detector to 1.5 samples
     per pixel at the isocentre, so a 512 px projector has src = det = 1024 px
-    and 768 bins. Rays are clipped to the unit circle even when circle=False.
+    and 768 bins. With circle=True rays are clipped to the inscribed circle; with
+    circle=False they cover the whole square image, corners included.
 
     Example:
         >>> projector = FanBeam(img_size=256, n_angles=360)
@@ -82,9 +98,11 @@ class FanBeam(BaseProjector):
             det_spacing: Pitch of the detector bins in pixels (alternative to
                 det_width); det_width becomes det_spacing * (n_det - 1)
             angle_range: Range of angles (default: full rotation)
-            n_samples: Samples per ray (default: img_size)
-            circle: If True, mask image to inscribed circle. Rays are still
-                clipped to the unit circle when this is False.
+            n_samples: Samples per ray (default: img_size, or img_size times the
+                ray radius with circle=False, so sample spacing stays about one pixel)
+            circle: If True, mask the image to its inscribed circle and clip rays
+                to it. If False, clip rays to the circle around the whole square,
+                so every pixel, corners included, is projected and backprojected.
             angles: Explicit angle samples in radians. When omitted, n_angles
                 samples cover [start, end) with spacing (end - start) / n_angles.
             backend: "torch" (default) runs everywhere on PyTorch operations.
@@ -114,7 +132,10 @@ class FanBeam(BaseProjector):
         src_dist = float(2 * img_size if src_dist is None else src_dist)
         det_dist = float(2 * img_size if det_dist is None else det_dist)
         n_det = int(round(1.5 * img_size) if n_det is None else n_det)
-        n_samples = int(img_size if n_samples is None else n_samples)
+        self.ray_radius = _ray_radius(img_size, circle)
+        if n_samples is None:
+            n_samples = img_size if circle else int(np.ceil(img_size * self.ray_radius))
+        n_samples = int(n_samples)
         super().__init__(img_size, n_angles, n_det, angle_range, angles=angles, learnable_geometry=learnable_geometry)
         self.backend = _check_backend(backend, ("auto", "torch", "cuda"))
         if approximate and backend not in ("cuda", "auto"):
@@ -446,7 +467,7 @@ class FanBeam(BaseProjector):
         length = torch.sqrt(dir_x**2 + dir_y**2)
         dir_x, dir_y = dir_x / length, dir_y / length
         b = 2 * (src_x * dir_x + src_y * dir_y)
-        c = src_x**2 + src_y**2 - 1.0
+        c = src_x**2 + src_y**2 - self.ray_radius**2
         root = torch.sqrt(torch.clamp(b**2 - 4 * c, min=0))
         t_entry = torch.clamp((-b - root) / 2, min=0)
         t_exit = torch.maximum((-b + root) / 2, t_entry)
@@ -545,7 +566,7 @@ class FanBeam(BaseProjector):
         dir_y = dir_y / ray_len_full
         a = dir_x**2 + dir_y**2
         b = 2 * (src_x * dir_x + src_y * dir_y)
-        c = src_x**2 + src_y**2 - 1.0
+        c = src_x**2 + src_y**2 - self.ray_radius**2
         disc = torch.clamp(b**2 - 4 * a * c, min=0)
         sqrt_disc = torch.sqrt(disc)
         t_entry = torch.clamp((-b - sqrt_disc) / (2 * a), min=0)

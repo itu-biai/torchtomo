@@ -1,5 +1,8 @@
 """Tests for fan beam projector."""
 
+import pytest
+import torch
+
 from torchtomo import FanBeam, shepp_logan
 
 
@@ -70,3 +73,44 @@ class TestFanBeam:
         repr_str = repr(fan_projector)
         assert "FanBeam" in repr_str
         assert "src_dist" in repr_str
+
+
+def _backends():
+    from torchtomo._nvrtc import runtime_available
+
+    backends = [("torch", "cpu")]
+    if torch.cuda.is_available() and runtime_available():
+        backends.append(("cuda", "cuda"))
+    return backends
+
+
+@pytest.mark.parametrize("backend,device", _backends())
+def test_corners_are_projected_without_the_circle(backend, device):
+    """circle=False models the whole square: a corner pixel reaches the sinogram and the adjoint reaches it."""
+    size = 32
+    projector = FanBeam(img_size=size, n_angles=36, circle=False, backend=backend).to(device)
+    centre = torch.zeros(1, 1, size, size, device=device)
+    centre[..., size // 2, size // 2] = 1
+    centre_sum = float(projector(centre).sum())
+    for i, j in ((0, 0), (0, size - 1), (size - 1, 0), (size - 1, size - 1), (1, 2)):
+        x = torch.zeros(1, 1, size, size, device=device)
+        x[..., i, j] = 1
+        y = projector(x)
+        assert float(y.sum()) > 0.5 * centre_sum, (i, j)
+        back = projector.adjoint(torch.ones_like(y))
+        torch.testing.assert_close(back[0, 0, i, j], y.sum(), rtol=1e-4, atol=1e-6)
+
+
+def test_circle_still_masks_the_corners():
+    size = 32
+    projector = FanBeam(img_size=size, n_angles=36, circle=True)
+    x = torch.zeros(1, 1, size, size)
+    x[..., 0, 0] = 1
+    assert float(projector(x).abs().sum()) == 0.0
+
+
+def test_default_samples_follow_the_ray_radius():
+    assert FanBeam(img_size=64, n_angles=4).n_samples == 64
+    full = FanBeam(img_size=64, n_angles=4, circle=False)
+    assert full.n_samples >= 64 * 2**0.5
+    assert FanBeam(img_size=64, n_angles=4, circle=False, n_samples=50).n_samples == 50

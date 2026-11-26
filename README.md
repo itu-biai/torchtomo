@@ -228,8 +228,9 @@ the transpose of the forward operator.
 Angles are in **radians**, and lateral shifts and fan-beam distances are in
 **pixels**. Default views cover `[0, π)` for parallel beam and `[0, 2π)` for fan
 beam, without repeating the endpoint. Supply `angles=` for explicit views.
-`circle=True` masks the image to its inscribed circle; fan-beam rays remain
-clipped to the unit circle even with `circle=False`.
+`circle=True` masks the image to its inscribed circle. With `circle=False`
+fan-beam rays cover the whole square image, corners included, and the default
+`n_samples` grows with the longer rays.
 
 ## Differentiate through reconstruction
 
