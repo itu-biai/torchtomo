@@ -63,6 +63,16 @@ class TestFilters:
         freq = torch.fft.fftfreq(size).abs()
         assert torch.allclose(filt[1:], freq[1:], rtol=0.03, atol=1e-4)
 
+    def test_shepp_logan_matches_its_spatial_kernel(self):
+        """Shepp and Logan's (1974) kernel -2 / (pi^2 (4 n^2 - 1)) is the ramp times sinc(f)."""
+        size = 1024
+        tap = torch.fft.fftfreq(size, d=1.0 / size).to(torch.float64)
+        kernel = -2.0 / (math.pi**2 * (4 * tap**2 - 1))
+        expected = torch.fft.fft(kernel).real.to(torch.float32)
+        filt = get_filter(size, "shepp-logan")
+        # At Nyquist the response is 2 / pi of the ramp, not zero.
+        assert torch.allclose(filt, expected, rtol=0.01, atol=1e-4)
+
     def test_fbp_reprojects_to_its_own_measurements(self):
         """FBP inverts the forward projector: gain 1, no constant offset."""
         size, n_angles = 256, 180
