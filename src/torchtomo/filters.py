@@ -65,7 +65,7 @@ def _build_filter(
     if filter_name == "ramp":
         filt = ramp
     elif filter_name == "shepp-logan":
-        filt = ramp * torch.sinc(2 * freq)
+        filt = ramp * torch.sinc(freq)
     elif filter_name == "cosine":
         filt = ramp * torch.cos(torch.pi * freq)
     elif filter_name == "hamming":
